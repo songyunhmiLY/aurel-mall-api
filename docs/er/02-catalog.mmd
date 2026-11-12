@@ -1,0 +1,23 @@
+erDiagram
+  products ||--o{ product_skus : "product_id"
+  product_skus ||--o| sku_stocks : "sku_id"
+
+  products {
+    bigint id PK
+    varchar zone
+    varchar name
+    varchar status
+  }
+  product_skus {
+    bigint id PK
+    bigint product_id
+    varchar sku_code UK
+    int price_fen
+    varchar status
+  }
+  sku_stocks {
+    bigint id PK
+    bigint sku_id UK
+    int quantity
+    datetime updated_at
+  }

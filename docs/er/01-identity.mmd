@@ -1,0 +1,36 @@
+erDiagram
+  users ||--o{ user_identities : "user_id"
+  users ||--o{ user_addresses : "user_id"
+  admin_users |o--o{ admin_settings : "updated_by_admin_id"
+
+  users {
+    bigint id PK
+    varchar status
+    varchar nickname
+    datetime created_at
+    datetime updated_at
+  }
+  user_identities {
+    bigint id PK
+    bigint user_id
+    varchar provider
+    varchar identifier UK
+  }
+  user_addresses {
+    bigint id PK
+    bigint user_id
+    varchar contact_name
+    boolean is_default
+  }
+  admin_users {
+    bigint id PK
+    varchar username UK
+    varchar password_hash
+    varchar status
+  }
+  admin_settings {
+    bigint id PK
+    varchar setting_key UK
+    varchar setting_value
+    bigint updated_by_admin_id
+  }

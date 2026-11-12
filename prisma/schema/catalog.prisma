@@ -1,0 +1,39 @@
+/// zone: mall 商城 / startup 创业专区。status: draft / on / off。
+model Product {
+  id        BigInt   @id @default(autoincrement())
+  zone      String   @db.VarChar(32)
+  name      String   @db.VarChar(128)
+  subtitle  String?  @db.VarChar(255)
+  coverUrl  String?  @map("cover_url") @db.VarChar(512)
+  status    String   @db.VarChar(32)
+  createdAt DateTime @map("created_at") @db.DateTime(3)
+  updatedAt DateTime @map("updated_at") @db.DateTime(3)
+
+  @@index([zone, status], map: "products_zone_status_idx")
+  @@map("products")
+}
+
+/// priceFen 单位为分。
+model ProductSku {
+  id        BigInt   @id @default(autoincrement())
+  productId BigInt   @map("product_id")
+  skuCode   String   @unique(map: "product_skus_sku_code_uq") @map("sku_code") @db.VarChar(64)
+  name      String   @db.VarChar(128)
+  priceFen  Int      @map("price_fen")
+  status    String   @db.VarChar(32)
+  createdAt DateTime @map("created_at") @db.DateTime(3)
+  updatedAt DateTime @map("updated_at") @db.DateTime(3)
+
+  @@index([productId], map: "product_skus_product_id_idx")
+  @@map("product_skus")
+}
+
+/// 与 SKU 逻辑上一对一，skuId 唯一索引，没有外键。
+model SkuStock {
+  id        BigInt   @id @default(autoincrement())
+  skuId     BigInt   @unique(map: "sku_stocks_sku_id_uq") @map("sku_id")
+  quantity  Int
+  updatedAt DateTime @map("updated_at") @db.DateTime(3)
+
+  @@map("sku_stocks")
+}

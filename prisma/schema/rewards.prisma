@@ -1,0 +1,130 @@
+/// 邀请树。parentUserId 为空表示根。path / depth 由后续服务维护，供递归查询使用。
+model InviteTreeNode {
+  id           BigInt   @id @default(autoincrement())
+  userId       BigInt   @unique(map: "invite_tree_user_id_uq") @map("user_id")
+  parentUserId BigInt?  @map("parent_user_id")
+  depth        Int
+  path         String   @db.VarChar(2048)
+  joinedAt     DateTime @map("joined_at") @db.DateTime(3)
+
+  @@index([parentUserId], map: "invite_tree_parent_user_id_idx")
+  @@map("invite_tree_nodes")
+}
+
+/// 市场树，与邀请树分开存储。安置规则未实现。
+model MarketTreeNode {
+  id           BigInt   @id @default(autoincrement())
+  userId       BigInt   @unique(map: "market_tree_user_id_uq") @map("user_id")
+  parentUserId BigInt?  @map("parent_user_id")
+  depth        Int
+  path         String   @db.VarChar(2048)
+  placedAt     DateTime @map("placed_at") @db.DateTime(3)
+
+  @@index([parentUserId], map: "market_tree_parent_user_id_idx")
+  @@map("market_tree_nodes")
+}
+
+/// 报单占位。status: draft / submitted / settled / void。
+model Filing {
+  id        BigInt    @id @default(autoincrement())
+  filingNo  String    @unique(map: "filings_filing_no_uq") @map("filing_no") @db.VarChar(32)
+  userId    BigInt    @map("user_id")
+  orderId   BigInt?   @map("order_id")
+  status    String    @db.VarChar(32)
+  amountFen Int       @map("amount_fen")
+  filedAt   DateTime? @map("filed_at") @db.DateTime(3)
+  settledAt DateTime? @map("settled_at") @db.DateTime(3)
+  createdAt DateTime  @map("created_at") @db.DateTime(3)
+  updatedAt DateTime  @map("updated_at") @db.DateTime(3)
+
+  @@index([userId, filedAt], map: "filings_user_id_filed_at_idx")
+  @@index([orderId], map: "filings_order_id_idx")
+  @@map("filings")
+}
+
+/// rewardType 预留 startup_sales / startup_points / mall_sales / mall_points / position_dividend / cofounder / studio / operations / red_packet。
+model RewardLedgerEntry {
+  id         BigInt   @id @default(autoincrement())
+  userId     BigInt   @map("user_id")
+  rewardType String   @map("reward_type") @db.VarChar(64)
+  amountFen  BigInt   @map("amount_fen")
+  /// pending / posted / void
+  status     String   @db.VarChar(32)
+  bizType    String   @map("biz_type") @db.VarChar(64)
+  bizId      String   @map("biz_id") @db.VarChar(64)
+  occurredAt DateTime @map("occurred_at") @db.DateTime(3)
+  createdAt  DateTime @map("created_at") @db.DateTime(3)
+
+  @@index([userId, occurredAt], map: "reward_ledger_user_occurred_idx")
+  @@index([rewardType, occurredAt], map: "reward_ledger_type_occurred_idx")
+  @@index([bizType, bizId], map: "reward_ledger_biz_idx")
+  @@map("reward_ledger_entries")
+}
+
+/// 职位名录。分红份额不在本表，而在锁定环境变量 POSITION_DIVIDEND_SHARE_TIERS，按 code 逻辑对应。
+model Position {
+  id        BigInt   @id @default(autoincrement())
+  code      String   @unique(map: "positions_code_uq") @db.VarChar(32)
+  name      String   @db.VarChar(64)
+  rankLevel Int      @map("rank_level")
+  createdAt DateTime @map("created_at") @db.DateTime(3)
+  updatedAt DateTime @map("updated_at") @db.DateTime(3)
+
+  @@map("positions")
+}
+
+/// status: active / revoked。
+model UserPosition {
+  id         BigInt    @id @default(autoincrement())
+  userId     BigInt    @map("user_id")
+  positionId BigInt    @map("position_id")
+  status     String    @db.VarChar(32)
+  grantedAt  DateTime  @map("granted_at") @db.DateTime(3)
+  revokedAt  DateTime? @map("revoked_at") @db.DateTime(3)
+  createdAt  DateTime  @map("created_at") @db.DateTime(3)
+  updatedAt  DateTime  @map("updated_at") @db.DateTime(3)
+
+  @@index([userId, status], map: "user_positions_user_status_idx")
+  @@index([positionId], map: "user_positions_position_id_idx")
+  @@map("user_positions")
+}
+
+/// bizDate 为 Asia/Shanghai 的日历日，格式 YYYY-MM-DD。
+model RedPacketDailyAccrual {
+  id              BigInt   @id @default(autoincrement())
+  bizDate         String   @unique(map: "red_packet_daily_biz_date_uq") @map("biz_date") @db.Char(10)
+  startupSalesFen BigInt   @map("startup_sales_fen")
+  accrualFen      BigInt   @map("accrual_fen")
+  accruedAt       DateTime @map("accrued_at") @db.DateTime(3)
+  createdAt       DateTime @map("created_at") @db.DateTime(3)
+
+  @@map("red_packet_daily_accruals")
+}
+
+/// 开轮时把当时的门槛 K、上限 C 抄到本行。status: open / closed。
+model RedPacketRound {
+  id              BigInt    @id @default(autoincrement())
+  roundNo         Int       @unique(map: "red_packet_rounds_round_no_uq") @map("round_no")
+  status          String    @db.VarChar(32)
+  payThresholdFen Int       @map("pay_threshold_fen")
+  claimCapFen     Int       @map("claim_cap_fen")
+  openedAt        DateTime? @map("opened_at") @db.DateTime(3)
+  closedAt        DateTime? @map("closed_at") @db.DateTime(3)
+  createdAt       DateTime  @map("created_at") @db.DateTime(3)
+  updatedAt       DateTime  @map("updated_at") @db.DateTime(3)
+
+  @@map("red_packet_rounds")
+}
+
+model RedPacketClaim {
+  id        BigInt   @id @default(autoincrement())
+  roundId   BigInt   @map("round_id")
+  userId    BigInt   @map("user_id")
+  amountFen Int      @map("amount_fen")
+  claimedAt DateTime @map("claimed_at") @db.DateTime(3)
+  createdAt DateTime @map("created_at") @db.DateTime(3)
+
+  @@index([roundId, userId], map: "red_packet_claims_round_user_idx")
+  @@index([userId, claimedAt], map: "red_packet_claims_user_claimed_idx")
+  @@map("red_packet_claims")
+}

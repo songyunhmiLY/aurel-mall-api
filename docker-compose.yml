@@ -1,0 +1,104 @@
+name: aurel-mall
+
+services:
+  mysql:
+    image: mysql:8.4
+    restart: unless-stopped
+    environment:
+      TZ: Asia/Shanghai
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root_dev_password}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-aurel_mall}
+      MYSQL_USER: ${MYSQL_USER:-aurel}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-aurel_dev_password}
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+    ports:
+      - '3306:3306'
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ['CMD-SHELL', 'mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent']
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ['redis-server', '--appendonly', 'yes']
+    ports:
+      - '6379:6379'
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+
+  api:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - '3000:3000'
+    environment:
+      NODE_ENV: production
+      TZ: Asia/Shanghai
+      PORT: 3000
+      # 容器内固定走服务名，不使用 .env 里给宿主机开发准备的 127.0.0.1。
+      DATABASE_URL: mysql://${MYSQL_USER:-aurel}:${MYSQL_PASSWORD:-aurel_dev_password}@mysql:3306/${MYSQL_DATABASE:-aurel_mall}
+      REDIS_URL: redis://redis:6379
+      ALLOW_CLOCK_OVERRIDE: ${ALLOW_CLOCK_OVERRIDE:-false}
+      JWT_ADMIN_SECRET: ${JWT_ADMIN_SECRET:-dev-admin-jwt-placeholder}
+      MINI_PROGRAM_TOKEN_SECRET: ${MINI_PROGRAM_TOKEN_SECRET:-dev-mini-program-placeholder}
+      # 需求 §1.1 锁定配置。启动时读入内存，没有修改接口。
+      # 金额为分；比例为万分比（10000 = 100%）。未在需求里给出的数字是示例。
+      STARTUP_ZONE_UNIT_PRICE_FEN: ${STARTUP_ZONE_UNIT_PRICE_FEN:-100000}
+      FILING_WITHDRAWAL_RATIO_BPS: ${FILING_WITHDRAWAL_RATIO_BPS:-8000}
+      STARTUP_SALES_AWARD_RATIO_BPS: ${STARTUP_SALES_AWARD_RATIO_BPS:-1000}
+      STARTUP_SALES_AWARD_WITHDRAWABLE_BPS: ${STARTUP_SALES_AWARD_WITHDRAWABLE_BPS:-7000}
+      STARTUP_SALES_AWARD_POINTS_BPS: ${STARTUP_SALES_AWARD_POINTS_BPS:-3000}
+      STARTUP_POINT_AWARD_RATIO_BPS: ${STARTUP_POINT_AWARD_RATIO_BPS:-500}
+      STARTUP_POINT_AWARD_WITHDRAWABLE_BPS: ${STARTUP_POINT_AWARD_WITHDRAWABLE_BPS:-0}
+      STARTUP_POINT_AWARD_POINTS_BPS: ${STARTUP_POINT_AWARD_POINTS_BPS:-10000}
+      MALL_SALES_AWARD_RATIO_BPS: ${MALL_SALES_AWARD_RATIO_BPS:-800}
+      MALL_SALES_AWARD_WITHDRAWABLE_BPS: ${MALL_SALES_AWARD_WITHDRAWABLE_BPS:-7000}
+      MALL_SALES_AWARD_POINTS_BPS: ${MALL_SALES_AWARD_POINTS_BPS:-3000}
+      MALL_POINT_AWARD_RATIO_BPS: ${MALL_POINT_AWARD_RATIO_BPS:-300}
+      MALL_POINT_AWARD_WITHDRAWABLE_BPS: ${MALL_POINT_AWARD_WITHDRAWABLE_BPS:-0}
+      MALL_POINT_AWARD_POINTS_BPS: ${MALL_POINT_AWARD_POINTS_BPS:-10000}
+      POSITION_DIVIDEND_SHARE_TIERS: ${POSITION_DIVIDEND_SHARE_TIERS:-leader:1,manager:2,director:3}
+      RED_PACKET_DAILY_ACCRUAL_BPS: ${RED_PACKET_DAILY_ACCRUAL_BPS:-100}
+      # K：需求示例 5000 元。
+      RED_PACKET_ROUND_PAY_THRESHOLD_FEN: ${RED_PACKET_ROUND_PAY_THRESHOLD_FEN:-500000}
+      # C：需求示例 8000 元。
+      RED_PACKET_ROUND_CLAIM_CAP_FEN: ${RED_PACKET_ROUND_CLAIM_CAP_FEN:-800000}
+      COFOUNDER_DIVIDEND_RATIO_BPS: ${COFOUNDER_DIVIDEND_RATIO_BPS:-3000}
+      STUDIO_DIVIDEND_RATIO_BPS: ${STUDIO_DIVIDEND_RATIO_BPS:-2000}
+      OPERATIONS_TEAM_DIVIDEND_RATIO_BPS: ${OPERATIONS_TEAM_DIVIDEND_RATIO_BPS:-1000}
+      # T 不是锁定项，只作为 admin_settings 的首次默认值。
+      MARKETING_MANAGER_MARKET_THRESHOLD_DEFAULT: ${MARKETING_MANAGER_MARKET_THRESHOLD_DEFAULT:-10000}
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:3000/api/v1/health').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 40s
+
+volumes:
+  mysql_data:
+  redis_data:

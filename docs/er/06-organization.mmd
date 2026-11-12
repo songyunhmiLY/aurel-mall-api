@@ -1,0 +1,57 @@
+erDiagram
+  users ||--o| invite_tree_nodes : "user_id"
+  users ||--o| market_tree_nodes : "user_id"
+  invite_tree_nodes |o--o{ invite_tree_nodes : "parent_user_id"
+  market_tree_nodes |o--o{ market_tree_nodes : "parent_user_id"
+  users ||--o{ filings : "user_id"
+  orders |o--o{ filings : "order_id"
+  users ||--o{ reward_ledger_entries : "user_id"
+  users ||--o{ user_positions : "user_id"
+  positions ||--o{ user_positions : "position_id"
+
+  invite_tree_nodes {
+    bigint id PK
+    bigint user_id UK
+    bigint parent_user_id
+    int depth
+    varchar path
+    datetime joined_at
+  }
+  market_tree_nodes {
+    bigint id PK
+    bigint user_id UK
+    bigint parent_user_id
+    int depth
+    varchar path
+    datetime placed_at
+  }
+  filings {
+    bigint id PK
+    varchar filing_no UK
+    bigint user_id
+    bigint order_id
+    varchar status
+    int amount_fen
+    datetime filed_at
+  }
+  reward_ledger_entries {
+    bigint id PK
+    bigint user_id
+    varchar reward_type
+    bigint amount_fen
+    varchar status
+    datetime occurred_at
+  }
+  positions {
+    bigint id PK
+    varchar code UK
+    varchar name
+    int rank_level
+  }
+  user_positions {
+    bigint id PK
+    bigint user_id
+    bigint position_id
+    varchar status
+    datetime granted_at
+  }

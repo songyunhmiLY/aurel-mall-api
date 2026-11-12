@@ -1,0 +1,11 @@
+/// 仅存放管理员可改的配置。锁定项不写入本表。
+/// 当前键：marketing_manager_market_threshold（营销经理市场门槛 T，单位待产品确认）。
+model AdminSetting {
+  id               BigInt   @id @default(autoincrement())
+  settingKey       String   @unique(map: "admin_settings_setting_key_uq") @map("setting_key") @db.VarChar(64)
+  settingValue     String   @map("setting_value") @db.VarChar(255)
+  updatedAt        DateTime @map("updated_at") @db.DateTime(3)
+  updatedByAdminId BigInt?  @map("updated_by_admin_id")
+
+  @@map("admin_settings")
+}

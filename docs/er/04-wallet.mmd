@@ -1,0 +1,21 @@
+erDiagram
+  users ||--o{ wallet_accounts : "user_id"
+  wallet_accounts ||--o{ wallet_ledger_entries : "account_id"
+
+  wallet_accounts {
+    bigint id PK
+    bigint user_id
+    varchar wallet_type
+    bigint balance_fen
+  }
+  wallet_ledger_entries {
+    bigint id PK
+    bigint account_id
+    bigint user_id
+    varchar direction
+    bigint amount_fen
+    bigint balance_after_fen
+    varchar biz_type
+    varchar biz_id
+    datetime occurred_at
+  }
