@@ -7,7 +7,6 @@ import {
 } from '@nestjs/common';
 import type { AppEnv } from '../../config/app-env';
 import { APP_ENV } from '../../config/tokens';
-import { isClockOverrideCallerAllowed, type ClockCaller } from './clock-access';
 import { RedisClockOverrideStore } from './clock-override.store';
 import {
   BUSINESS_TIMEZONE,
@@ -41,6 +40,11 @@ export interface ClockOverrideView {
   timezone: typeof BUSINESS_TIMEZONE;
 }
 
+/**
+ * 业务当前时间的唯一入口。
+ * 是否接受覆盖只看 ALLOW_CLOCK_OVERRIDE。开关关闭时忽略一切覆盖请求，
+ * 也不读取已保存的覆盖值。不看主机名、来源地址或额外密钥。
+ */
 @Injectable()
 export class ClockService {
   private readonly logger = new Logger(ClockService.name);
@@ -53,6 +57,11 @@ export class ClockService {
   async now(): Promise<Date> {
     const resolved = await this.resolve();
     return resolved.now;
+  }
+
+  /** 由已知的 Unix 毫秒构造时刻，不是读取当前时间。 */
+  instant(unixMs: number): Date {
+    return new Date(unixMs);
   }
 
   async startOfDay(instant?: Date): Promise<Date> {
@@ -68,6 +77,7 @@ export class ClockService {
   }
 
   async resolve(): Promise<ResolvedClock> {
+    // 真实时间只在这里读取。业务代码不能自己取系统时间当作当前时间。
     const realNow = new Date();
     if (!this.env.allowClockOverride) {
       return { now: realNow, realNow, source: 'real' };
@@ -92,23 +102,13 @@ export class ClockService {
     };
   }
 
-  async readOverride(caller: ClockCaller): Promise<ClockOverrideView> {
+  async readOverride(): Promise<ClockOverrideView> {
     const resolved = await this.resolve();
-    if (!this.callerMayMutate(caller)) {
-      return {
-        allowed: false,
-        source: 'real',
-        now: resolved.realNow.toISOString(),
-        realNow: resolved.realNow.toISOString(),
-        override: null,
-        timezone: BUSINESS_TIMEZONE,
-      };
-    }
-    return this.toView(resolved, true);
+    return this.toView(resolved, this.env.allowClockOverride);
   }
 
-  async setOverride(iso: string, caller: ClockCaller): Promise<ClockOverrideView> {
-    this.assertCaller(caller);
+  async setOverride(iso: string): Promise<ClockOverrideView> {
+    this.assertOverrideEnabled();
     const parsed = new Date(iso);
     if (Number.isNaN(parsed.getTime())) {
       throw new BadRequestException('无效的 ISO 时间');
@@ -118,22 +118,18 @@ export class ClockService {
     return this.toView(await this.resolve(), true);
   }
 
-  async clearOverride(caller: ClockCaller): Promise<ClockOverrideView> {
-    this.assertCaller(caller);
+  async clearOverride(): Promise<ClockOverrideView> {
+    this.assertOverrideEnabled();
     await this.store.clear();
     this.logger.log('clock override cleared');
     return this.toView(await this.resolve(), true);
   }
 
-  private assertCaller(caller: ClockCaller): void {
-    if (!this.callerMayMutate(caller)) {
-      this.logger.warn('clock override ignored');
-      throw new ForbiddenException('时钟覆盖未启用或调用方不在允许范围，本次操作已忽略');
+  private assertOverrideEnabled(): void {
+    if (!this.env.allowClockOverride) {
+      this.logger.warn('clock override ignored because ALLOW_CLOCK_OVERRIDE is off');
+      throw new ForbiddenException('时钟覆盖未启用，本次操作已忽略');
     }
-  }
-
-  private callerMayMutate(caller: ClockCaller): boolean {
-    return this.env.allowClockOverride && isClockOverrideCallerAllowed(caller);
   }
 
   private toView(resolved: ResolvedClock, allowed: boolean): ClockOverrideView {

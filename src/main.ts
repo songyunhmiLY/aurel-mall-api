@@ -11,7 +11,7 @@ import { APP_ENV } from './config/tokens';
 loadDotenv();
 
 async function bootstrap(): Promise<void> {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create(AppModule, { rawBody: true });
   app.enableShutdownHooks();
   app.setGlobalPrefix('api/v1');
   app.useGlobalPipes(
