@@ -1,0 +1,314 @@
+type Row = Record<string, unknown> & { id: bigint };
+
+interface Filter {
+  in?: unknown[];
+  contains?: string;
+}
+
+function coded(code: string): Error & { code: string } {
+  const error = new Error(code) as Error & { code: string };
+  error.code = code;
+  return error;
+}
+
+function same(left: unknown, right: unknown): boolean {
+  if (typeof left === 'bigint' && typeof right === 'bigint') {
+    return left === right;
+  }
+  if (left instanceof Date && right instanceof Date) {
+    return left.getTime() === right.getTime();
+  }
+  return left === right;
+}
+
+function isFilter(value: unknown): value is Filter {
+  return (
+    value !== null &&
+    typeof value === 'object' &&
+    !(value instanceof Date) &&
+    typeof value !== 'bigint' &&
+    ('in' in value || 'contains' in value)
+  );
+}
+
+function matches(row: Row, where: Record<string, unknown> | undefined): boolean {
+  if (!where) {
+    return true;
+  }
+  for (const [key, expected] of Object.entries(where)) {
+    if (key === 'provider_identifier') {
+      const compound = expected as { provider?: string; identifier?: string };
+      if (row.provider !== compound.provider || row.identifier !== compound.identifier) {
+        return false;
+      }
+      continue;
+    }
+    const actual = row[key];
+    if (isFilter(expected)) {
+      if (expected.in && !expected.in.some((item) => same(actual, item))) {
+        return false;
+      }
+      if (
+        expected.contains !== undefined &&
+        (typeof actual !== 'string' || !actual.includes(expected.contains))
+      ) {
+        return false;
+      }
+      continue;
+    }
+    if (!same(actual, expected)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function cloneRow(row: Row): Row {
+  const copy: Row = { id: row.id };
+  for (const [key, value] of Object.entries(row)) {
+    copy[key] = value instanceof Date ? new Date(value.getTime()) : value;
+  }
+  return copy;
+}
+
+function compareRows(left: Row, right: Row, orderBy: unknown): number {
+  const orders = Array.isArray(orderBy) ? orderBy : orderBy ? [orderBy] : [];
+  for (const order of orders) {
+    if (!order || typeof order !== 'object') {
+      continue;
+    }
+    for (const [key, direction] of Object.entries(order as Record<string, unknown>)) {
+      const sign = direction === 'desc' ? -1 : 1;
+      const av = left[key];
+      const bv = right[key];
+      if (same(av, bv)) {
+        continue;
+      }
+      if (av instanceof Date && bv instanceof Date) {
+        return (av.getTime() - bv.getTime()) * sign;
+      }
+      if (typeof av === 'bigint' && typeof bv === 'bigint') {
+        return (av < bv ? -1 : 1) * sign;
+      }
+      if (typeof av === 'number' && typeof bv === 'number') {
+        return (av - bv) * sign;
+      }
+      if (typeof av === 'boolean' && typeof bv === 'boolean') {
+        return (Number(av) - Number(bv)) * sign;
+      }
+      return String(av).localeCompare(String(bv)) * sign;
+    }
+  }
+  return 0;
+}
+
+class MemoryTable {
+  rows: Row[] = [];
+  private nextId = 1n;
+
+  constructor(private readonly uniques: string[][]) {}
+
+  findUnique(args: { where: Record<string, unknown> }): Row | null {
+    return cloneRowOrNull(this.rows.find((row) => matches(row, args.where)) ?? null);
+  }
+
+  findFirst(args: { where?: Record<string, unknown>; orderBy?: unknown }): Row | null {
+    const rows = this.filtered(args.where, args.orderBy);
+    return cloneRowOrNull(rows[0] ?? null);
+  }
+
+  findMany(args?: {
+    where?: Record<string, unknown>;
+    orderBy?: unknown;
+    skip?: number;
+    take?: number;
+  }): Row[] {
+    const rows = this.filtered(args?.where, args?.orderBy);
+    const skip = args?.skip ?? 0;
+    const take = args?.take ?? rows.length;
+    return rows.slice(skip, skip + take).map((row) => cloneRow(row));
+  }
+
+  count(args?: { where?: Record<string, unknown> }): number {
+    return this.rows.filter((row) => matches(row, args?.where)).length;
+  }
+
+  create(args: { data: Record<string, unknown> }): Row {
+    const row = this.materialize(this.nextId++, args.data);
+    this.assertUnique(row, null);
+    this.rows.push(row);
+    return cloneRow(row);
+  }
+
+  createMany(args: { data: Record<string, unknown>[] }): { count: number } {
+    for (const data of args.data) {
+      this.create({ data });
+    }
+    return { count: args.data.length };
+  }
+
+  update(args: { where: Record<string, unknown>; data: Record<string, unknown> }): Row {
+    const index = this.rows.findIndex((row) => matches(row, args.where));
+    const current = this.rows[index];
+    if (index < 0 || !current) {
+      throw coded('P2025');
+    }
+    const next = this.materialize(current.id, { ...current, ...definedData(args.data) });
+    this.assertUnique(next, current.id);
+    this.rows[index] = next;
+    return cloneRow(next);
+  }
+
+  updateMany(args: { where: Record<string, unknown>; data: Record<string, unknown> }): {
+    count: number;
+  } {
+    let count = 0;
+    this.rows = this.rows.map((row) => {
+      if (!matches(row, args.where)) {
+        return row;
+      }
+      count += 1;
+      return this.materialize(row.id, { ...row, ...definedData(args.data) });
+    });
+    return { count };
+  }
+
+  delete(args: { where: Record<string, unknown> }): Row {
+    const index = this.rows.findIndex((row) => matches(row, args.where));
+    const current = this.rows[index];
+    if (index < 0 || !current) {
+      throw coded('P2025');
+    }
+    this.rows.splice(index, 1);
+    return cloneRow(current);
+  }
+
+  deleteMany(args: { where: Record<string, unknown> }): { count: number } {
+    const before = this.rows.length;
+    this.rows = this.rows.filter((row) => !matches(row, args.where));
+    return { count: before - this.rows.length };
+  }
+
+  snapshot(): { rows: Row[]; nextId: bigint } {
+    return { rows: this.rows.map((row) => cloneRow(row)), nextId: this.nextId };
+  }
+
+  restore(snapshot: { rows: Row[]; nextId: bigint }): void {
+    this.rows = snapshot.rows.map((row) => cloneRow(row));
+    this.nextId = snapshot.nextId;
+  }
+
+  private filtered(where: Record<string, unknown> | undefined, orderBy: unknown): Row[] {
+    const rows = this.rows.filter((row) => matches(row, where));
+    if (!orderBy) {
+      return rows;
+    }
+    return [...rows].sort((left, right) => compareRows(left, right, orderBy));
+  }
+
+  private materialize(id: bigint, data: Record<string, unknown>): Row {
+    const row: Row = { id };
+    for (const [key, value] of Object.entries(data)) {
+      if (key === 'id') {
+        continue;
+      }
+      row[key] = value instanceof Date ? new Date(value.getTime()) : value;
+    }
+    return row;
+  }
+
+  private assertUnique(row: Row, exceptId: bigint | null): void {
+    for (const fields of this.uniques) {
+      const key = uniqueKey(row, fields);
+      if (key === null) {
+        continue;
+      }
+      const clash = this.rows.find(
+        (existing) => existing.id !== exceptId && uniqueKey(existing, fields) === key,
+      );
+      if (clash) {
+        throw coded('P2002');
+      }
+    }
+  }
+}
+
+function uniqueKey(row: Row, fields: string[]): string | null {
+  const parts: string[] = [];
+  for (const field of fields) {
+    const value = row[field];
+    if (value === null || value === undefined) {
+      return null;
+    }
+    parts.push(typeof value === 'bigint' ? `b:${value.toString()}` : `s:${String(value)}`);
+  }
+  return parts.join('|');
+}
+
+function definedData(data: Record<string, unknown>): Record<string, unknown> {
+  const next: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(data)) {
+    if (value !== undefined) {
+      next[key] = value;
+    }
+  }
+  return next;
+}
+
+function cloneRowOrNull(row: Row | null): Row | null {
+  return row ? cloneRow(row) : null;
+}
+
+/**
+ * 测试用的内存表，只覆盖本阶段服务实际调用的 Prisma 方法。
+ */
+export class Stage1Db {
+  readonly user = new MemoryTable([['inviteCode']]);
+  readonly userIdentity = new MemoryTable([['provider', 'identifier']]);
+  readonly userKyc = new MemoryTable([['userId']]);
+  readonly userAddress = new MemoryTable([]);
+  readonly inviteTreeNode = new MemoryTable([['userId']]);
+  readonly marketTreeNode = new MemoryTable([['userId']]);
+  readonly product = new MemoryTable([]);
+  readonly productSku = new MemoryTable([['skuCode']]);
+  readonly skuStock = new MemoryTable([['skuId']]);
+  readonly productImage = new MemoryTable([]);
+  readonly mallCategory = new MemoryTable([]);
+
+  async $transaction<T>(fn: (tx: Stage1Db) => Promise<T>): Promise<T> {
+    const snapshot = this.snapshot();
+    try {
+      return await fn(this);
+    } catch (error) {
+      this.restore(snapshot);
+      throw error;
+    }
+  }
+
+  private snapshot(): Map<MemoryTable, { rows: Row[]; nextId: bigint }> {
+    const tables = this.tables();
+    return new Map(tables.map((table) => [table, table.snapshot()]));
+  }
+
+  private restore(snapshot: Map<MemoryTable, { rows: Row[]; nextId: bigint }>): void {
+    for (const [table, state] of snapshot) {
+      table.restore(state);
+    }
+  }
+
+  private tables(): MemoryTable[] {
+    return [
+      this.user,
+      this.userIdentity,
+      this.userKyc,
+      this.userAddress,
+      this.inviteTreeNode,
+      this.marketTreeNode,
+      this.product,
+      this.productSku,
+      this.skuStock,
+      this.productImage,
+      this.mallCategory,
+    ];
+  }
+}

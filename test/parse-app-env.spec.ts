@@ -11,6 +11,9 @@ describe('locked runtime config', () => {
   it('parses the documented example and freezes it', () => {
     const env = parseAppEnv(example);
     expect(env.allowClockOverride).toBe(false);
+    expect(env.allowPreviewAuth).toBe(false);
+    expect(env.wechatMiniAppId).toBeNull();
+    expect(env.wechatMiniAppSecret).toBeNull();
     expect(env.adminBootstrapUsername).toBeNull();
     expect(env.adminBootstrapPassword).toBeNull();
     expect(env.wechatPayNotifyUrl).toBeNull();
@@ -40,6 +43,13 @@ describe('locked runtime config', () => {
       delete broken[key];
       expect(() => parseAppEnv(broken)).toThrow(key);
     }
+  });
+
+  it('rejects preview auth values other than true or false', () => {
+    expect(() => parseAppEnv({ ...example, ALLOW_PREVIEW_AUTH: 'yes' })).toThrow(
+      /ALLOW_PREVIEW_AUTH/,
+    );
+    expect(parseAppEnv({ ...example, ALLOW_PREVIEW_AUTH: 'true' }).allowPreviewAuth).toBe(true);
   });
 
   it('rejects a wallet split that does not add up to 10000', () => {

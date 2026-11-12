@@ -1,5 +1,6 @@
 erDiagram
   users ||--o{ user_identities : "user_id"
+  users ||--o| user_kyc : "user_id"
   users ||--o{ user_addresses : "user_id"
   admin_users |o--o{ admin_settings : "updated_by_admin_id"
 
@@ -7,6 +8,8 @@ erDiagram
     bigint id PK
     varchar status
     varchar nickname
+    varchar phone
+    varchar invite_code UK
     datetime created_at
     datetime updated_at
   }
@@ -15,6 +18,15 @@ erDiagram
     bigint user_id
     varchar provider
     varchar identifier UK
+    varchar union_id
+  }
+  user_kyc {
+    bigint id PK
+    bigint user_id UK
+    varchar real_name
+    char id_number
+    varchar mobile
+    varchar status
   }
   user_addresses {
     bigint id PK

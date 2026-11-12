@@ -4,7 +4,7 @@
 
 金额字段单位是**分**。业务时间由应用通过 `ClockService` 写入，列上没有 `CURRENT_TIMESTAMP` 默认值。
 
-登录唯一键（手机号还是微信 openid）还没定。`user_identities.provider + identifier` 可以同时挂多种身份，本图不把它画成“唯一登录账号”。
+小程序登录键是 `user_identities` 里 `provider = wechat_mini` 的 openid。手机号不是登录键。`wechat_oa`、`wechat_web`、`sms_phone` 只预留。`union_id` 只留存，不参与合并。
 
 渲染好的图：
 
@@ -22,9 +22,12 @@
 
 `admin_settings` 只放管理员可改的配置（营销经理市场门槛 T，以及微信支付商户号、API 证书、APIv3 密钥）。锁定配置不进这张表。证书放在 `TEXT` 字段里。
 
+`users.phone` 是微信手机号组件绑定的号码，可空、不唯一。`users.invite_code` 本阶段只有根账户会写，值为 `ROOT`。`user_kyc` 保存姓名、身份证号和手机号；格式通过后 `status = verified`。
+
 ```mermaid
 erDiagram
   users ||--o{ user_identities : "user_id"
+  users ||--o| user_kyc : "user_id"
   users ||--o{ user_addresses : "user_id"
   admin_users |o--o{ admin_settings : "updated_by_admin_id"
 
@@ -32,6 +35,8 @@ erDiagram
     bigint id PK
     varchar status
     varchar nickname
+    varchar phone
+    varchar invite_code UK
     datetime created_at
     datetime updated_at
   }
@@ -40,6 +45,15 @@ erDiagram
     bigint user_id
     varchar provider
     varchar identifier UK
+    varchar union_id
+  }
+  user_kyc {
+    bigint id PK
+    bigint user_id UK
+    varchar real_name
+    char id_number
+    varchar mobile
+    varchar status
   }
   user_addresses {
     bigint id PK
@@ -63,24 +77,41 @@ erDiagram
 
 ## 2. 商品、SKU、库存
 
-`products.zone` 预留 `mall`（商城）和 `startup`（创业专区）。价格是分。
+`products.zone` 是 `mall`（会员商城）或 `startup`（创业专区）。每个商品一个 SKU。价格和运费是分。商城 `pv_fen` 也是分，100 = 1 PV = 1 元；创业专区保持 null。`mall_categories` 只给会员商城用。
 
 ```mermaid
 erDiagram
+  mall_categories ||--o{ products : "category_id"
+  products ||--o{ product_images : "product_id"
   products ||--o{ product_skus : "product_id"
   product_skus ||--o| sku_stocks : "sku_id"
 
+  mall_categories {
+    bigint id PK
+    varchar name
+    int sort_order
+  }
   products {
     bigint id PK
     varchar zone
     varchar name
+    text body
+    int freight_fen
+    bigint category_id
     varchar status
+  }
+  product_images {
+    bigint id PK
+    bigint product_id
+    varchar url
+    int sort_order
   }
   product_skus {
     bigint id PK
     bigint product_id
     varchar sku_code UK
     int price_fen
+    int pv_fen
     varchar status
   }
   sku_stocks {
@@ -193,7 +224,7 @@ erDiagram
 
 ## 6. 邀请树、市场树、报单、奖励、职位
 
-两棵树分开存。`parent_user_id`、`depth`、`path` 留给以后的递归 SQL，组树规则还没实现。职位分红**份额**不在 `positions` 表里，而在环境变量 `POSITION_DIVIDEND_SHARE_TIERS`，用 `positions.code` 做逻辑对应。
+两棵树分开存。启动时只为官方根账户各写一行：`parent_user_id` 为空，`depth` 为 0。其他用户的安置算法还没实现。有市场树席位才是会员。职位分红**份额**不在 `positions` 表里，而在环境变量 `POSITION_DIVIDEND_SHARE_TIERS`，用 `positions.code` 做逻辑对应。
 
 ```mermaid
 erDiagram

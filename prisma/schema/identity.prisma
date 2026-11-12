@@ -1,28 +1,55 @@
-/// 经销商用户。登录账号不是本表的唯一键。
+/// 经销商用户。小程序登录键是 user_identities 里的 wechat_mini openid，不是手机号。
+/// status: active / disabled。停用只拒绝登录，不取消会员资格，也不释放市场树席位。
 model User {
   id        BigInt   @id @default(autoincrement())
-  /// active / disabled。由应用写入。
   status    String   @db.VarChar(32)
   nickname  String   @db.VarChar(64)
   avatarUrl String?  @map("avatar_url") @db.VarChar(512)
+  /// 微信手机号快速验证绑定的号码。不是登录唯一键，不用于合并账号，允许重复。
+  phone      String?  @db.VarChar(32)
+  /// 本阶段只有系统根账户会写入邀请码。
+  inviteCode String?  @unique(map: "users_invite_code_uq") @map("invite_code") @db.VarChar(32)
   createdAt DateTime @map("created_at") @db.DateTime(3)
   updatedAt DateTime @map("updated_at") @db.DateTime(3)
 
   @@index([status], map: "users_status_idx")
+  @@index([phone], map: "users_phone_idx")
   @@map("users")
 }
 
-/// 可同时挂多种身份。phone / wechat_openid / wechat_unionid 哪一个是登录唯一键尚未确认。
+/// 同一用户可挂多种身份。登录只认下面这些 provider 里已经实现的那一种。
+/// wechat_mini：小程序 openid，本阶段的正式登录键。
+/// wechat_oa / wechat_web / sms_phone：预留，不实现登录。分别留给公众号 OAuth、网站应用 OAuth、短信登录。
+/// preview：仅 ALLOW_PREVIEW_AUTH 打开时的开发预览身份，不是正式 H5 登录。
+/// system_root：标记预置根账户，不能用来登录。
+/// union_id 只留存微信返回的 unionid，不参与查找或合并。不同入口的 openid 在以后绑定 unionid 之前不是同一人。
 model UserIdentity {
   id         BigInt   @id @default(autoincrement())
   userId     BigInt   @map("user_id")
   provider   String   @db.VarChar(32)
   identifier String   @db.VarChar(128)
+  unionId    String?  @map("union_id") @db.VarChar(128)
   createdAt  DateTime @map("created_at") @db.DateTime(3)
 
   @@unique([provider, identifier], map: "user_identities_provider_identifier_uq")
   @@index([userId], map: "user_identities_user_id_idx")
   @@map("user_identities")
+}
+
+/// 实名资料。只收集姓名、身份证号、手机号。格式通过即记为 verified。
+/// 提现前才需要已核验。浏览、下单、消费账户划转不读这张表。
+model UserKyc {
+  id          BigInt   @id @default(autoincrement())
+  userId      BigInt   @unique(map: "user_kyc_user_id_uq") @map("user_id")
+  realName    String   @map("real_name") @db.VarChar(64)
+  idNumber    String   @map("id_number") @db.Char(18)
+  mobile      String   @db.VarChar(20)
+  /// verified
+  status      String   @db.VarChar(32)
+  submittedAt DateTime @map("submitted_at") @db.DateTime(3)
+  updatedAt   DateTime @map("updated_at") @db.DateTime(3)
+
+  @@map("user_kyc")
 }
 
 model AdminUser {
