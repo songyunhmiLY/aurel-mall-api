@@ -1,0 +1,1 @@
+export const MARKETING_MANAGER_MARKET_THRESHOLD_KEY = 'marketing_manager_market_threshold';

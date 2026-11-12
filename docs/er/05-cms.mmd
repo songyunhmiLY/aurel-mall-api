@@ -1,0 +1,22 @@
+erDiagram
+  banners {
+    bigint id PK
+    varchar title
+    varchar image_url
+    varchar link_url
+    int sort_order
+    varchar status
+  }
+  articles {
+    bigint id PK
+    varchar title
+    text body
+    varchar status
+    datetime published_at
+  }
+  tickers {
+    bigint id PK
+    varchar content
+    int sort_order
+    varchar status
+  }

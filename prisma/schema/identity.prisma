@@ -1,0 +1,55 @@
+/// 经销商用户。登录账号不是本表的唯一键。
+model User {
+  id        BigInt   @id @default(autoincrement())
+  /// active / disabled。由应用写入。
+  status    String   @db.VarChar(32)
+  nickname  String   @db.VarChar(64)
+  avatarUrl String?  @map("avatar_url") @db.VarChar(512)
+  createdAt DateTime @map("created_at") @db.DateTime(3)
+  updatedAt DateTime @map("updated_at") @db.DateTime(3)
+
+  @@index([status], map: "users_status_idx")
+  @@map("users")
+}
+
+/// 可同时挂多种身份。phone / wechat_openid / wechat_unionid 哪一个是登录唯一键尚未确认。
+model UserIdentity {
+  id         BigInt   @id @default(autoincrement())
+  userId     BigInt   @map("user_id")
+  provider   String   @db.VarChar(32)
+  identifier String   @db.VarChar(128)
+  createdAt  DateTime @map("created_at") @db.DateTime(3)
+
+  @@unique([provider, identifier], map: "user_identities_provider_identifier_uq")
+  @@index([userId], map: "user_identities_user_id_idx")
+  @@map("user_identities")
+}
+
+model AdminUser {
+  id           BigInt   @id @default(autoincrement())
+  username     String   @unique(map: "admin_users_username_uq") @db.VarChar(64)
+  passwordHash String   @map("password_hash") @db.VarChar(255)
+  displayName  String   @map("display_name") @db.VarChar(64)
+  status       String   @db.VarChar(32)
+  createdAt    DateTime @map("created_at") @db.DateTime(3)
+  updatedAt    DateTime @map("updated_at") @db.DateTime(3)
+
+  @@map("admin_users")
+}
+
+model UserAddress {
+  id           BigInt   @id @default(autoincrement())
+  userId       BigInt   @map("user_id")
+  contactName  String   @map("contact_name") @db.VarChar(64)
+  contactPhone String   @map("contact_phone") @db.VarChar(32)
+  province     String   @db.VarChar(32)
+  city         String   @db.VarChar(32)
+  district     String   @db.VarChar(32)
+  detail       String   @db.VarChar(255)
+  isDefault    Boolean  @map("is_default")
+  createdAt    DateTime @map("created_at") @db.DateTime(3)
+  updatedAt    DateTime @map("updated_at") @db.DateTime(3)
+
+  @@index([userId], map: "user_addresses_user_id_idx")
+  @@map("user_addresses")
+}

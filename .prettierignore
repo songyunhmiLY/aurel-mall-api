@@ -1,0 +1,7 @@
+dist
+node_modules
+coverage
+prisma/schema/migrations
+package-lock.json
+docs/er/*.svg
+docs/er/*.png

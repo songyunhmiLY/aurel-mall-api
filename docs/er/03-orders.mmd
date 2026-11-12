@@ -1,0 +1,33 @@
+erDiagram
+  users ||--o{ orders : "user_id"
+  orders ||--o{ order_items : "order_id"
+  product_skus ||--o{ order_items : "sku_id"
+  orders ||--o{ payments : "order_id"
+
+  orders {
+    bigint id PK
+    varchar order_no UK
+    bigint user_id
+    varchar zone
+    varchar status
+    int pay_amount_fen
+    datetime placed_at
+    datetime paid_at
+  }
+  order_items {
+    bigint id PK
+    bigint order_id
+    bigint sku_id
+    int unit_price_fen
+    int quantity
+    int line_total_fen
+  }
+  payments {
+    bigint id PK
+    bigint order_id
+    varchar pay_no UK
+    varchar channel
+    int amount_fen
+    varchar status
+    datetime succeeded_at
+  }

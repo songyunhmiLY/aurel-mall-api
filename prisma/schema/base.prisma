@@ -1,0 +1,12 @@
+// 逻辑关联只保存 id 并建索引，不使用 @relation，因此不会生成 FOREIGN KEY。
+// 业务时间由应用通过 ClockService 写入，不使用 @default(now()) 或 @updatedAt。
+// 金额字段单位为分（整数）。
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
