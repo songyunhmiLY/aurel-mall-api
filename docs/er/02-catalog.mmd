@@ -1,18 +1,35 @@
 erDiagram
+  mall_categories ||--o{ products : "category_id"
+  products ||--o{ product_images : "product_id"
   products ||--o{ product_skus : "product_id"
   product_skus ||--o| sku_stocks : "sku_id"
 
+  mall_categories {
+    bigint id PK
+    varchar name
+    int sort_order
+  }
   products {
     bigint id PK
     varchar zone
     varchar name
+    text body
+    int freight_fen
+    bigint category_id
     varchar status
+  }
+  product_images {
+    bigint id PK
+    bigint product_id
+    varchar url
+    int sort_order
   }
   product_skus {
     bigint id PK
     bigint product_id
     varchar sku_code UK
     int price_fen
+    int pv_fen
     varchar status
   }
   sku_stocks {

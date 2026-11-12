@@ -1,25 +1,58 @@
-/// zone: mall 商城 / startup 创业专区。status: draft / on / off。
+/// zone: mall 会员商城 / startup 创业专区。status: draft / on / off。
+/// 每个商品恰好一个 SKU，没有款式。创业专区售价由锁定单价 N 写入，不在这里设默认值。
 model Product {
-  id        BigInt   @id @default(autoincrement())
-  zone      String   @db.VarChar(32)
-  name      String   @db.VarChar(128)
-  subtitle  String?  @db.VarChar(255)
-  coverUrl  String?  @map("cover_url") @db.VarChar(512)
-  status    String   @db.VarChar(32)
-  createdAt DateTime @map("created_at") @db.DateTime(3)
-  updatedAt DateTime @map("updated_at") @db.DateTime(3)
+  id         BigInt   @id @default(autoincrement())
+  zone       String   @db.VarChar(32)
+  name       String   @db.VarChar(128)
+  subtitle   String?  @db.VarChar(255)
+  /// 详情正文。
+  body       String?  @db.Text
+  coverUrl   String?  @map("cover_url") @db.VarChar(512)
+  /// 运费，单位分。没有地区费率。
+  freightFen Int      @map("freight_fen")
+  /// 会员商城分类。创业专区为空。
+  categoryId BigInt?  @map("category_id")
+  status     String   @db.VarChar(32)
+  createdAt  DateTime @map("created_at") @db.DateTime(3)
+  updatedAt  DateTime @map("updated_at") @db.DateTime(3)
 
   @@index([zone, status], map: "products_zone_status_idx")
+  @@index([categoryId], map: "products_category_id_idx")
   @@map("products")
 }
 
-/// priceFen 单位为分。
+/// 会员商城分类。sort_order 只用于列表排序。
+model MallCategory {
+  id        BigInt   @id @default(autoincrement())
+  name      String   @db.VarChar(64)
+  sortOrder Int      @map("sort_order")
+  createdAt DateTime @map("created_at") @db.DateTime(3)
+  updatedAt DateTime @map("updated_at") @db.DateTime(3)
+
+  @@index([sortOrder], map: "mall_categories_sort_order_idx")
+  @@map("mall_categories")
+}
+
+/// 商品附图。封面仍在 products.cover_url。管理端填写 URL，没有上传服务。
+model ProductImage {
+  id        BigInt   @id @default(autoincrement())
+  productId BigInt   @map("product_id")
+  url       String   @db.VarChar(512)
+  sortOrder Int      @map("sort_order")
+  createdAt DateTime @map("created_at") @db.DateTime(3)
+
+  @@index([productId, sortOrder], map: "product_images_product_sort_idx")
+  @@map("product_images")
+}
+
+/// priceFen 单位为分。pvFen 只用于商城：100 = 1 PV = 1 元，不是售价。创业专区保持 null。
 model ProductSku {
   id        BigInt   @id @default(autoincrement())
   productId BigInt   @map("product_id")
   skuCode   String   @unique(map: "product_skus_sku_code_uq") @map("sku_code") @db.VarChar(64)
   name      String   @db.VarChar(128)
   priceFen  Int      @map("price_fen")
+  pvFen     Int?     @map("pv_fen")
   status    String   @db.VarChar(32)
   createdAt DateTime @map("created_at") @db.DateTime(3)
   updatedAt DateTime @map("updated_at") @db.DateTime(3)
@@ -28,7 +61,7 @@ model ProductSku {
   @@map("product_skus")
 }
 
-/// 与 SKU 逻辑上一对一，skuId 唯一索引，没有外键。
+/// 与 SKU 逻辑上一对一，skuId 唯一索引，没有外键。本阶段只允许管理端设置数量，不扣库存。
 model SkuStock {
   id        BigInt   @id @default(autoincrement())
   skuId     BigInt   @unique(map: "sku_stocks_sku_id_uq") @map("sku_id")

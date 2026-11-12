@@ -7,8 +7,11 @@ export interface AppEnv {
   databaseUrl: string;
   redisUrl: string;
   allowClockOverride: boolean;
+  allowPreviewAuth: boolean;
   adminJwtSecret: string;
   miniProgramTokenSecret: string;
+  wechatMiniAppId: string | null;
+  wechatMiniAppSecret: string | null;
   adminBootstrapUsername: string | null;
   adminBootstrapPassword: string | null;
   adminBootstrapDisplayName: string | null;
@@ -28,8 +31,11 @@ export function parseAppEnv(source: NodeJS.ProcessEnv): AppEnv {
     databaseUrl,
     redisUrl,
     allowClockOverride: readFlag(source, 'ALLOW_CLOCK_OVERRIDE'),
+    allowPreviewAuth: readFlag(source, 'ALLOW_PREVIEW_AUTH'),
     adminJwtSecret: readSecret(source, 'JWT_ADMIN_SECRET'),
     miniProgramTokenSecret: readSecret(source, 'MINI_PROGRAM_TOKEN_SECRET'),
+    wechatMiniAppId: readOptional(source, 'WECHAT_MINI_APP_ID'),
+    wechatMiniAppSecret: readOptional(source, 'WECHAT_MINI_APP_SECRET'),
     ...readAdminBootstrap(source),
     wechatPayNotifyUrl: readNotifyUrl(source),
     marketingManagerMarketThresholdDefault: readThresholdDefault(source),
