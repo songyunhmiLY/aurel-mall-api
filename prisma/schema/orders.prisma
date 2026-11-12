@@ -34,17 +34,21 @@ model OrderItem {
   @@map("order_items")
 }
 
-/// channel 为支付渠道占位，微信支付未实现。status: pending / success / failed。
+/// channel: wechat。status: pending / success / failed。时间由应用写入。
+/// active_slot 在待支付时为 order:{orderId}，终态清空，保证同一订单同时只有一笔待支付。
 model Payment {
-  id          BigInt    @id @default(autoincrement())
-  orderId     BigInt    @map("order_id")
-  payNo       String    @unique(map: "payments_pay_no_uq") @map("pay_no") @db.VarChar(64)
-  channel     String    @db.VarChar(32)
-  amountFen   Int       @map("amount_fen")
-  status      String    @db.VarChar(32)
-  succeededAt DateTime? @map("succeeded_at") @db.DateTime(3)
-  createdAt   DateTime  @map("created_at") @db.DateTime(3)
-  updatedAt   DateTime  @map("updated_at") @db.DateTime(3)
+  id             BigInt    @id @default(autoincrement())
+  orderId        BigInt    @map("order_id")
+  payNo          String    @unique(map: "payments_pay_no_uq") @map("pay_no") @db.VarChar(64)
+  channel        String    @db.VarChar(32)
+  amountFen      Int       @map("amount_fen")
+  status         String    @db.VarChar(32)
+  channelTradeNo String?   @unique(map: "payments_channel_trade_no_uq") @map("channel_trade_no") @db.VarChar(64)
+  prepayId       String?   @map("prepay_id") @db.VarChar(64)
+  activeSlot     String?   @unique(map: "payments_active_slot_uq") @map("active_slot") @db.VarChar(64)
+  succeededAt    DateTime? @map("succeeded_at") @db.DateTime(3)
+  createdAt      DateTime  @map("created_at") @db.DateTime(3)
+  updatedAt      DateTime  @map("updated_at") @db.DateTime(3)
 
   @@index([orderId], map: "payments_order_id_idx")
   @@index([status], map: "payments_status_idx")

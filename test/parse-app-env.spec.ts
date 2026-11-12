@@ -11,6 +11,9 @@ describe('locked runtime config', () => {
   it('parses the documented example and freezes it', () => {
     const env = parseAppEnv(example);
     expect(env.allowClockOverride).toBe(false);
+    expect(env.adminBootstrapUsername).toBeNull();
+    expect(env.adminBootstrapPassword).toBeNull();
+    expect(env.wechatPayNotifyUrl).toBeNull();
     expect(env.port).toBe(3000);
     expect(env.marketingManagerMarketThresholdDefault).toBe('10000');
     expect(env.locked.startupZoneUnitPriceFen).toBe(100_000);
@@ -43,6 +46,34 @@ describe('locked runtime config', () => {
     expect(() => parseAppEnv({ ...example, STARTUP_SALES_AWARD_WITHDRAWABLE_BPS: '2000' })).toThrow(
       /STARTUP_SALES_AWARD/,
     );
+  });
+
+  it('treats admin bootstrap and the wechat notify url as optional', () => {
+    expect(() =>
+      parseAppEnv({ ...example, ADMIN_BOOTSTRAP_USERNAME: 'root', ADMIN_BOOTSTRAP_PASSWORD: '' }),
+    ).toThrow(/同时/);
+    expect(() =>
+      parseAppEnv({
+        ...example,
+        ADMIN_BOOTSTRAP_USERNAME: 'root',
+        ADMIN_BOOTSTRAP_PASSWORD: 'short',
+      }),
+    ).toThrow(/8 到 128/);
+    const bootstrapped = parseAppEnv({
+      ...example,
+      ADMIN_BOOTSTRAP_USERNAME: 'root',
+      ADMIN_BOOTSTRAP_PASSWORD: 'bootstrap-pass',
+      ADMIN_BOOTSTRAP_DISPLAY_NAME: '平台',
+      WECHAT_PAY_NOTIFY_URL: 'http://127.0.0.1:3000/api/v1/payments/wechat/notify',
+    });
+    expect(bootstrapped.adminBootstrapUsername).toBe('root');
+    expect(bootstrapped.adminBootstrapDisplayName).toBe('平台');
+    expect(bootstrapped.wechatPayNotifyUrl).toBe(
+      'http://127.0.0.1:3000/api/v1/payments/wechat/notify',
+    );
+    expect(() =>
+      parseAppEnv({ ...example, WECHAT_PAY_NOTIFY_URL: 'ftp://files.example.com/hook' }),
+    ).toThrow(/WECHAT_PAY_NOTIFY_URL/);
   });
 
   it('rejects duplicate position codes', () => {

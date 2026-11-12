@@ -8,19 +8,19 @@
 
 渲染好的图：
 
-| 域 | Mermaid 源 | SVG | PNG |
-| --- | --- | --- | --- |
-| 身份、地址、管理员 | [01-identity.mmd](er/01-identity.mmd) | [SVG](er/01-identity.svg) | [PNG](er/01-identity.png) |
-| 商品、SKU、库存 | [02-catalog.mmd](er/02-catalog.mmd) | [SVG](er/02-catalog.svg) | [PNG](er/02-catalog.png) |
-| 订单与支付 | [03-orders.mmd](er/03-orders.mmd) | [SVG](er/03-orders.svg) | [PNG](er/03-orders.png) |
-| 钱包流水 | [04-wallet.mmd](er/04-wallet.mmd) | [SVG](er/04-wallet.svg) | [PNG](er/04-wallet.png) |
-| 内容 | [05-cms.mmd](er/05-cms.mmd) | [SVG](er/05-cms.svg) | [PNG](er/05-cms.png) |
+| 域                   | Mermaid 源                                    | SVG                           | PNG                           |
+| -------------------- | --------------------------------------------- | ----------------------------- | ----------------------------- |
+| 身份、地址、管理员   | [01-identity.mmd](er/01-identity.mmd)         | [SVG](er/01-identity.svg)     | [PNG](er/01-identity.png)     |
+| 商品、SKU、库存      | [02-catalog.mmd](er/02-catalog.mmd)           | [SVG](er/02-catalog.svg)      | [PNG](er/02-catalog.png)      |
+| 订单与支付           | [03-orders.mmd](er/03-orders.mmd)             | [SVG](er/03-orders.svg)       | [PNG](er/03-orders.png)       |
+| 钱包流水             | [04-wallet.mmd](er/04-wallet.mmd)             | [SVG](er/04-wallet.svg)       | [PNG](er/04-wallet.png)       |
+| 内容                 | [05-cms.mmd](er/05-cms.mmd)                   | [SVG](er/05-cms.svg)          | [PNG](er/05-cms.png)          |
 | 树、报单、奖励、职位 | [06-organization.mmd](er/06-organization.mmd) | [SVG](er/06-organization.svg) | [PNG](er/06-organization.png) |
-| 红包 | [07-red-packet.mmd](er/07-red-packet.mmd) | [SVG](er/07-red-packet.svg) | [PNG](er/07-red-packet.png) |
+| 红包                 | [07-red-packet.mmd](er/07-red-packet.mmd)     | [SVG](er/07-red-packet.svg)   | [PNG](er/07-red-packet.png)   |
 
 ## 1. 身份、地址、管理员
 
-`admin_settings` 只放管理员可改的配置（目前是营销经理市场门槛 T）。锁定配置不进这张表。
+`admin_settings` 只放管理员可改的配置（营销经理市场门槛 T，以及微信支付商户号、API 证书、APIv3 密钥）。锁定配置不进这张表。证书放在 `TEXT` 字段里。
 
 ```mermaid
 erDiagram
@@ -56,7 +56,7 @@ erDiagram
   admin_settings {
     bigint id PK
     varchar setting_key UK
-    varchar setting_value
+    text setting_value
     bigint updated_by_admin_id
   }
 ```
@@ -93,7 +93,7 @@ erDiagram
 
 ## 3. 订单与支付
 
-支付渠道字段只是占位，微信支付还没做。`placed_at` / `paid_at` / `succeeded_at` 都由时钟写入。
+`payments.channel = wechat` 时走微信支付下单和回调。状态是 `pending` / `success` / `failed`。`placed_at` / `paid_at` / `succeeded_at` 都由时钟写入。账户划扣和资金路径合规不在这张表里。
 
 ```mermaid
 erDiagram
@@ -127,6 +127,9 @@ erDiagram
     varchar channel
     int amount_fen
     varchar status
+    varchar channel_trade_no UK
+    varchar prepay_id
+    varchar active_slot UK
     datetime succeeded_at
   }
 ```
