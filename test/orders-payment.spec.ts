@@ -5,8 +5,10 @@ import {
   ValidationPipe,
 } from '@nestjs/common';
 import { validate } from 'class-validator';
+import { generateKeyPairSync } from 'node:crypto';
 import { PRODUCT_ZONE_MALL, PRODUCT_ZONE_STARTUP } from '../src/modules/catalog/catalog.constants';
 import { CreateOrderDto } from '../src/modules/orders/dto/create-order.dto';
+import type { WechatPayCredentials } from '../src/modules/payments/wechat-pay-settings.service';
 import {
   addressOf,
   boot,
@@ -17,6 +19,7 @@ import {
   marketNode,
   parentChain,
   stockOf,
+  type Stage2,
 } from './support/stage2-harness';
 
 describe('orders and forced payment', () => {
@@ -34,6 +37,16 @@ describe('orders and forced payment', () => {
       status: 'on',
     });
     return created.product;
+  }
+
+  async function startupOrder(stage: Stage2, buyer: bigint, name: string) {
+    const addressId = await addressOf(stage, buyer);
+    const product = await startupProduct(stage, name, 2);
+    return stage.orders.create(buyer, {
+      zone: PRODUCT_ZONE_STARTUP,
+      addressId,
+      items: [{ productId: product.id, quantity: 1 }],
+    });
   }
 
   async function mallProduct(
@@ -492,8 +505,183 @@ describe('orders and forced payment', () => {
     ).rejects.toThrow('地址不存在');
     expect(stage.db.order.rows.filter((row) => row.userId === buyer)).toHaveLength(0);
   });
+
+  it('fills omitted appId and openid from the wechat_mini identity', async () => {
+    const stage = buildStage2();
+    const rootId = await boot(stage);
+    const buyer = await loginBuyer(stage, 'live-fill', rootId);
+    enableLivePrepay(stage);
+    const created = await startupOrder(stage, buyer, '补齐');
+    const started = await stage.orders.pay(buyer, created.id);
+    expect(started.order.status).toBe('pending_payment');
+    expect(started.wechat).toMatchObject({
+      mode: 'live',
+      appId: 'wx-test-app',
+      status: 'pending',
+    });
+    expect(started.wechat?.paySign).toEqual(expect.any(String));
+    expect(stage.gateway.createJsapiTransaction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        appId: 'wx-test-app',
+        openid: 'openid-live-fill',
+        amountFen: 1000,
+      }),
+    );
+
+    const onlyAppId = await startupOrder(stage, buyer, '只带 appId');
+    await stage.orders.pay(buyer, onlyAppId.id, { appId: 'wx-test-app' });
+    const onlyOpenid = await startupOrder(stage, buyer, '只带 openid');
+    await stage.orders.pay(buyer, onlyOpenid.id, { openid: 'openid-live-fill' });
+    const blank = await startupOrder(stage, buyer, '空白');
+    await stage.orders.pay(buyer, blank.id, { appId: '   ', openid: ' \t ' });
+    expect(stage.gateway.createJsapiTransaction).toHaveBeenCalledTimes(4);
+    expect(stage.gateway.createJsapiTransaction).toHaveBeenLastCalledWith(
+      expect.objectContaining({ appId: 'wx-test-app', openid: 'openid-live-fill' }),
+    );
+  });
+
+  it('accepts appId and openid that match the session identity', async () => {
+    const stage = buildStage2();
+    const rootId = await boot(stage);
+    const buyer = await loginBuyer(stage, 'live-match', rootId);
+    enableLivePrepay(stage);
+    const created = await startupOrder(stage, buyer, '一致');
+    const started = await stage.orders.pay(buyer, created.id, {
+      appId: 'wx-test-app',
+      openid: 'openid-live-match',
+    });
+    expect(started.wechat?.mode).toBe('live');
+    expect(started.wechat?.appId).toBe('wx-test-app');
+    expect(stage.gateway.createJsapiTransaction).toHaveBeenCalledWith(
+      expect.objectContaining({ appId: 'wx-test-app', openid: 'openid-live-match' }),
+    );
+
+    const again = await stage.orders.pay(buyer, created.id, {
+      appId: '  wx-test-app  ',
+      openid: ' openid-live-match ',
+    });
+    expect(again.wechat?.payNo).toBe(started.wechat?.payNo);
+    expect(stage.gateway.createJsapiTransaction).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects appId or openid that does not match the session identity', async () => {
+    const stage = buildStage2();
+    const rootId = await boot(stage);
+    const buyer = await loginBuyer(stage, 'live-mismatch', rootId);
+    enableLivePrepay(stage);
+    const wrongApp = await startupOrder(stage, buyer, '错 appId');
+    await expectPayRejected(
+      stage.orders.pay(buyer, wrongApp.id, {
+        appId: 'wx-other',
+        openid: 'openid-live-mismatch',
+      }),
+      'appId 或 openid 与当前微信身份不一致',
+    );
+    const wrongOpenid = await startupOrder(stage, buyer, '错 openid');
+    await expectPayRejected(
+      stage.orders.pay(buyer, wrongOpenid.id, {
+        appId: 'wx-test-app',
+        openid: 'openid-someone-else',
+      }),
+      'appId 或 openid 与当前微信身份不一致',
+    );
+    const onlyWrongOpenid = await startupOrder(stage, buyer, '只错 openid');
+    await expectPayRejected(
+      stage.orders.pay(buyer, onlyWrongOpenid.id, { openid: 'openid-someone-else' }),
+      'appId 或 openid 与当前微信身份不一致',
+    );
+    expect(stage.gateway.createJsapiTransaction).not.toHaveBeenCalled();
+    expect((await stage.orders.getForUser(buyer, wrongApp.id)).status).toBe('pending_payment');
+  });
+
+  it('rejects live prepay when the user has no wechat_mini identity', async () => {
+    const stage = buildStage2();
+    const rootId = await boot(stage);
+    stage.env.allowPreviewAuth = true;
+    const session = await stage.users.loginPreview('preview-payer');
+    const buyer = session.user.id;
+    await stage.users.bindInviter(buyer, inviteCodeOf(stage, rootId));
+    enableLivePrepay(stage);
+    const created = await startupOrder(stage, buyer, '预览正式');
+    await expectPayRejected(
+      stage.orders.pay(buyer, created.id),
+      '当前账号没有微信小程序身份，无法微信支付下单',
+    );
+    await expectPayRejected(
+      stage.orders.pay(buyer, created.id, {
+        appId: 'wx-test-app',
+        openid: 'openid-preview-payer',
+      }),
+      '当前账号没有微信小程序身份，无法微信支付下单',
+    );
+    expect(stage.gateway.createJsapiTransaction).not.toHaveBeenCalled();
+    expect(stage.db.userIdentity.rows.some((row) => row.provider === 'wechat_mini')).toBe(false);
+  });
+
+  it('completes sandbox prepay without appId or openid when merchant materials are absent', async () => {
+    const stage = buildStage2();
+    const rootId = await boot(stage);
+    stage.env.allowPreviewAuth = true;
+    const session = await stage.users.loginPreview('preview-sandbox');
+    const buyer = session.user.id;
+    await stage.users.bindInviter(buyer, inviteCodeOf(stage, rootId));
+    const created = await startupOrder(stage, buyer, '沙箱');
+    const started = await stage.orders.pay(buyer, created.id);
+    expect(started.wechat?.mode).toBe('sandbox');
+    expect(started.wechat?.appId).toBeNull();
+    expect(started.wechat?.paySign).toBeNull();
+    expect(stage.gateway.createJsapiTransaction).not.toHaveBeenCalled();
+  });
+
+  it('covers an order from wallet balances without appId or openid when WeChat is configured', async () => {
+    const stage = buildStage2();
+    const rootId = await boot(stage);
+    const buyer = await loginBuyer(stage, 'cover-live', rootId);
+    enableLivePrepay(stage);
+    await credit(stage, buyer, 'points', 1000);
+    const created = await startupOrder(stage, buyer, '账户付清');
+    const paid = await stage.orders.pay(buyer, created.id);
+    expect(paid.wechat).toBeNull();
+    expect(paid.order.status).toBe('paid');
+    expect(paid.order.wechatFen).toBe(0);
+    expect(stage.gateway.createJsapiTransaction).not.toHaveBeenCalled();
+    expect(stage.db.payment.rows).toHaveLength(0);
+  });
 });
 
 function plainToDto(value: object): CreateOrderDto {
   return Object.assign(new CreateOrderDto(), value);
+}
+
+function enableLivePrepay(stage: Stage2): void {
+  const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
+  const credentials: WechatPayCredentials = {
+    merchantId: '1900000109',
+    apiV3Key: '0123456789abcdef0123456789abcdef',
+    certificatePem: 'test-certificate',
+    privateKeyPem: privateKey.export({ type: 'pkcs8', format: 'pem' }).toString(),
+    serialNumber: 'ABC',
+  };
+  stage.paySettings.credentials = credentials;
+  stage.env.wechatPayNotifyUrl = 'https://mall.example.com/api/v1/payments/wechat/notify';
+  stage.gateway.createJsapiTransaction.mockResolvedValue({ prepayId: 'prepay-live' });
+}
+
+function inviteCodeOf(stage: Stage2, userId: bigint): string {
+  const code = stage.db.user.rows.find((row) => row.id === userId)?.inviteCode;
+  if (typeof code !== 'string' || code.length === 0) {
+    throw new Error('missing invite code');
+  }
+  return code;
+}
+
+async function expectPayRejected(promise: Promise<unknown>, message: string): Promise<void> {
+  try {
+    await promise;
+  } catch (error) {
+    expect(error).toBeInstanceOf(BadRequestException);
+    expect(error).toMatchObject({ message });
+    return;
+  }
+  throw new Error(`expected 400: ${message}`);
 }
