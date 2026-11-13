@@ -1,5 +1,6 @@
 /// walletType: points 积分 / withdrawable 可提现 / consumption 消费。
-/// balanceFen 含冻结。frozenFen 是待微信支付确认的占用。可用 = balanceFen - frozenFen。
+/// balanceFen 含冻结。frozenFen 含待微信支付确认的占用，以及提现申请冻结。
+/// 可用 = balanceFen - frozenFen。
 model WalletAccount {
   id         BigInt   @id @default(autoincrement())
   userId     BigInt   @map("user_id")
@@ -40,11 +41,115 @@ model WalletLedgerEntry {
   balanceAfterFen BigInt   @map("balance_after_fen")
   bizType         String   @map("biz_type") @db.VarChar(64)
   bizId           String   @map("biz_id") @db.VarChar(64)
+  /// 可提现入账来源。支出和未分类流水为空。显示名不抄在流水上，查询时按当前配置归组。
+  sourceCode      String?  @map("source_code") @db.VarChar(64)
   occurredAt      DateTime @map("occurred_at") @db.DateTime(3)
   createdAt       DateTime @map("created_at") @db.DateTime(3)
 
   @@index([accountId, occurredAt], map: "wallet_ledger_account_occurred_idx")
   @@index([userId, occurredAt], map: "wallet_ledger_user_occurred_idx")
   @@index([bizType, bizId], map: "wallet_ledger_biz_idx")
+  @@index([userId, walletType, sourceCode], map: "wallet_ledger_user_type_source_idx")
   @@map("wallet_ledger_entries")
+}
+
+/// 消费账户的会员间划转。只动可用余额，不收手续费。
+model ConsumptionTransfer {
+  id          BigInt   @id @default(autoincrement())
+  payerUserId BigInt   @map("payer_user_id")
+  payeeUserId BigInt   @map("payee_user_id")
+  amountFen   BigInt   @map("amount_fen")
+  createdAt   DateTime @map("created_at") @db.DateTime(3)
+
+  @@index([payerUserId, createdAt], map: "consumption_transfers_payer_idx")
+  @@index([payeeUserId, createdAt], map: "consumption_transfers_payee_idx")
+  @@map("consumption_transfers")
+}
+
+/// 支付密码。浏览、下单不读这张表。消费账户划转确认时才校验。
+/// TODO: 需求未给出位数和字符集。当前只限制为 6 到 64 位且不含空白。
+model UserPaymentPassword {
+  id           BigInt   @id @default(autoincrement())
+  userId       BigInt   @unique(map: "user_payment_passwords_user_id_uq") @map("user_id")
+  passwordHash String   @map("password_hash") @db.VarChar(255)
+  updatedAt    DateTime @map("updated_at") @db.DateTime(3)
+
+  @@map("user_payment_passwords")
+}
+
+/// 提现收款账户。一个用户当前一条。申请提现时把当时的字段抄到申请上。
+model UserBankAccount {
+  id          BigInt   @id @default(autoincrement())
+  userId      BigInt   @unique(map: "user_bank_accounts_user_id_uq") @map("user_id")
+  accountName String   @map("account_name") @db.VarChar(64)
+  bankName    String   @map("bank_name") @db.VarChar(64)
+  accountNo   String   @map("account_no") @db.VarChar(32)
+  branchName  String   @map("branch_name") @db.VarChar(128)
+  updatedAt   DateTime @map("updated_at") @db.DateTime(3)
+
+  @@map("user_bank_accounts")
+}
+
+/// status: pending / rejected / paid。pending 期间 amountFen 冻结在可提现账户。
+model WithdrawalApplication {
+  id          BigInt   @id @default(autoincrement())
+  userId      BigInt   @map("user_id")
+  amountFen   BigInt   @map("amount_fen")
+  status      String   @db.VarChar(32)
+  accountName String   @map("account_name") @db.VarChar(64)
+  bankName    String   @map("bank_name") @db.VarChar(64)
+  accountNo   String   @map("account_no") @db.VarChar(32)
+  branchName  String   @map("branch_name") @db.VarChar(128)
+  appliedAt   DateTime @map("applied_at") @db.DateTime(3)
+  createdAt   DateTime @map("created_at") @db.DateTime(3)
+  updatedAt   DateTime @map("updated_at") @db.DateTime(3)
+
+  @@index([userId, status], map: "withdrawal_applications_user_status_idx")
+  @@index([status, appliedAt], map: "withdrawal_applications_status_applied_idx")
+  @@map("withdrawal_applications")
+}
+
+/// 每笔申请在驳回或打款时写一行。feeFen、payoutFen 只在打款时有值，手续费取打款当时的锁定配置。
+model WithdrawalSettlement {
+  id            BigInt   @id @default(autoincrement())
+  applicationId BigInt   @unique(map: "withdrawal_settlements_application_id_uq") @map("application_id")
+  userId        BigInt   @map("user_id")
+  outcome       String   @db.VarChar(32)
+  amountFen     BigInt   @map("amount_fen")
+  feeFen        BigInt?  @map("fee_fen")
+  payoutFen     BigInt?  @map("payout_fen")
+  adminId       BigInt   @map("admin_id")
+  settledAt     DateTime @map("settled_at") @db.DateTime(3)
+  createdAt     DateTime @map("created_at") @db.DateTime(3)
+
+  @@index([userId, settledAt], map: "withdrawal_settlements_user_settled_idx")
+  @@map("withdrawal_settlements")
+}
+
+/// 可提现账户的入账来源和当前显示名。分类按显示名文本归组，不按来源编码归组。
+/// 默认七个显示名见 §4.1：系统奖励、系统激励、平台分红、系统红包、销售激励、幸运返还、业绩奖。
+/// filing_settlement 是报单结算进入提现账户的部分。管理端可以改显示名。
+model WithdrawalDisplaySource {
+  id               BigInt   @id @default(autoincrement())
+  sourceCode       String   @unique(map: "withdrawal_display_sources_source_code_uq") @map("source_code") @db.VarChar(64)
+  displayName      String   @map("display_name") @db.VarChar(64)
+  updatedAt        DateTime @map("updated_at") @db.DateTime(3)
+  updatedByAdminId BigInt?  @map("updated_by_admin_id")
+
+  @@map("withdrawal_display_sources")
+}
+
+/// 只追加。微信退款受理和提现打款完成时写入。没有修改接口。
+model CashLedgerEntry {
+  id         BigInt   @id @default(autoincrement())
+  direction  String   @db.VarChar(16)
+  amountFen  BigInt   @map("amount_fen")
+  bizType    String   @map("biz_type") @db.VarChar(64)
+  bizId      String   @map("biz_id") @db.VarChar(64)
+  occurredAt DateTime @map("occurred_at") @db.DateTime(3)
+  createdAt  DateTime @map("created_at") @db.DateTime(3)
+
+  @@index([bizType, bizId], map: "cash_ledger_biz_idx")
+  @@index([occurredAt], map: "cash_ledger_occurred_idx")
+  @@map("cash_ledger_entries")
 }

@@ -1,4 +1,12 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
+
 type Row = Record<string, unknown> & { id: bigint };
+
+interface TxScope {
+  snapshot: Map<MemoryTable, { rows: Row[]; nextId: bigint }>;
+  releases: Array<() => void>;
+  held: Set<string>;
+}
 
 interface Filter {
   in?: unknown[];
@@ -263,6 +271,9 @@ function cloneRowOrNull(row: Row | null): Row | null {
  * 测试用的内存表，只覆盖本阶段服务实际调用的 Prisma 方法。
  */
 export class Stage1Db {
+  private readonly txScope = new AsyncLocalStorage<TxScope>();
+  private readonly userLockTail = new Map<string, Promise<void>>();
+
   readonly user = new MemoryTable([['inviteCode']]);
   readonly userIdentity = new MemoryTable([['provider', 'identifier']]);
   readonly userKyc = new MemoryTable([['userId']]);
@@ -280,6 +291,15 @@ export class Stage1Db {
   readonly walletAccount = new MemoryTable([['userId', 'walletType']]);
   readonly walletLedgerEntry = new MemoryTable([]);
   readonly walletHold = new MemoryTable([['orderId', 'walletType']]);
+  readonly consumptionTransfer = new MemoryTable([]);
+  readonly userPaymentPassword = new MemoryTable([['userId']]);
+  readonly userBankAccount = new MemoryTable([['userId']]);
+  readonly withdrawalApplication = new MemoryTable([]);
+  readonly withdrawalSettlement = new MemoryTable([['applicationId']]);
+  readonly withdrawalDisplaySource = new MemoryTable([['sourceCode']]);
+  readonly cashLedgerEntry = new MemoryTable([]);
+  readonly orderRefund = new MemoryTable([['wechatRefundNo']]);
+  readonly rewardLedgerEntry = new MemoryTable([]);
 
   async $queryRaw(
     strings: TemplateStringsArray,
@@ -312,17 +332,67 @@ export class Stage1Db {
       }
       return [{ id: row.id, status: row.status }];
     }
+    if (sql.includes('FROM users') && sql.includes('FOR UPDATE')) {
+      return this.lockUserRow(values[0]);
+    }
     return [];
   }
 
   async $transaction<T>(fn: (tx: Stage1Db) => Promise<T>): Promise<T> {
-    const snapshot = this.snapshot();
+    const scope: TxScope = {
+      snapshot: this.snapshot(),
+      releases: [],
+      held: new Set(),
+    };
     try {
-      return await fn(this);
+      return await this.txScope.run(scope, () => fn(this));
     } catch (error) {
-      this.restore(snapshot);
+      this.restore(scope.snapshot);
       throw error;
+    } finally {
+      for (const release of scope.releases) {
+        release();
+      }
     }
+  }
+
+  private async lockUserRow(userId: unknown): Promise<Record<string, unknown>[]> {
+    const key = typeof userId === 'bigint' ? userId.toString() : String(userId);
+    const scope = this.txScope.getStore();
+    if (!scope?.held.has(key)) {
+      const release = await this.acquireUserLock(key);
+      const current = this.txScope.getStore();
+      if (!current) {
+        release();
+      } else {
+        if (current.held.size === 0) {
+          current.snapshot = this.snapshot();
+        }
+        current.held.add(key);
+        current.releases.push(release);
+      }
+    }
+    const row = this.user.rows.find((item) => item.id === userId);
+    return row ? [{ id: row.id }] : [];
+  }
+
+  private acquireUserLock(key: string): Promise<() => void> {
+    const previous = this.userLockTail.get(key) ?? Promise.resolve();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    this.userLockTail.set(
+      key,
+      previous.then(
+        () => gate,
+        () => gate,
+      ),
+    );
+    return previous.then(
+      () => release,
+      () => release,
+    );
   }
 
   private snapshot(): Map<MemoryTable, { rows: Row[]; nextId: bigint }> {
@@ -355,6 +425,15 @@ export class Stage1Db {
       this.walletAccount,
       this.walletLedgerEntry,
       this.walletHold,
+      this.consumptionTransfer,
+      this.userPaymentPassword,
+      this.userBankAccount,
+      this.withdrawalApplication,
+      this.withdrawalSettlement,
+      this.withdrawalDisplaySource,
+      this.cashLedgerEntry,
+      this.orderRefund,
+      this.rewardLedgerEntry,
     ];
   }
 }

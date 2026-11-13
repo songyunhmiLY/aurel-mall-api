@@ -28,6 +28,12 @@ export interface LockedRuntimeConfig {
   cofounderDividendRatioBps: number;
   studioDividendRatioBps: number;
   operationsTeamDividendRatioBps: number;
+  /**
+   * 提现手续费，单位分。打款时从申请金额里减去当时的这个值。
+   * TODO: 需求 §1.1 的仓库清单里没有这项。任务要求手续费来自锁定配置，
+   * 且实付 = 申请金额 − 手续费，因此按固定分而不是比例解析。正式金额未确认。
+   */
+  withdrawalFeeFen: number;
 }
 
 export const LOCKED_RUNTIME_ENV_KEYS = [
@@ -52,6 +58,7 @@ export const LOCKED_RUNTIME_ENV_KEYS = [
   'COFOUNDER_DIVIDEND_RATIO_BPS',
   'STUDIO_DIVIDEND_RATIO_BPS',
   'OPERATIONS_TEAM_DIVIDEND_RATIO_BPS',
+  'WITHDRAWAL_FEE_FEN',
 ] as const;
 
 const BPS_MAX = 10_000;
@@ -92,6 +99,7 @@ export function parseLockedRuntimeConfig(source: NodeJS.ProcessEnv): LockedRunti
       min: 0,
       max: BPS_MAX,
     }),
+    withdrawalFeeFen: readInt(source, 'WITHDRAWAL_FEE_FEN', { min: 0 }),
   });
 }
 

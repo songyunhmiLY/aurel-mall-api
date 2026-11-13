@@ -38,6 +38,7 @@ function env(allowClockOverride: boolean): AppEnv {
       cofounderDividendRatioBps: 0,
       studioDividendRatioBps: 0,
       operationsTeamDividendRatioBps: 0,
+      withdrawalFeeFen: 0,
     }),
   };
 }

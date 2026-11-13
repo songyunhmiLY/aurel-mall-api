@@ -16,6 +16,16 @@ import {
 } from './wechat-pay-crypto';
 import type { WechatPayCredentials } from './wechat-pay-settings.service';
 
+/** 同一 out_refund_no 已被微信受理。调用方应结束本地入账，不要换号重试。 */
+export class WechatRefundAlreadyAccepted extends Error {
+  readonly wechatRefundAlreadyAccepted = true;
+
+  constructor() {
+    super('微信退款已受理');
+    this.name = 'WechatRefundAlreadyAccepted';
+  }
+}
+
 const WECHAT_API_ORIGIN = 'https://api.mch.weixin.qq.com';
 const JSAPI_PATH = '/v3/pay/transactions/jsapi';
 const CERTIFICATES_PATH = '/v3/certificates';
@@ -82,6 +92,39 @@ export class WechatPayGateway {
       throw new BadGatewayException('微信支付未返回 prepay_id');
     }
     return { prepayId };
+  }
+
+  async createDomesticRefund(input: {
+    merchantId: string;
+    privateKeyPem: string;
+    certificateSerial: string;
+    outTradeNo: string;
+    outRefundNo: string;
+    refundFen: number;
+    totalFen: number;
+  }): Promise<{ refundId: string; status: string }> {
+    const body = JSON.stringify({
+      out_trade_no: input.outTradeNo,
+      out_refund_no: input.outRefundNo,
+      amount: { refund: input.refundFen, total: input.totalFen, currency: 'CNY' },
+    });
+    const response = await this.signedFetch('POST', '/v3/refund/domestic/refunds', body, input);
+    const payload = await readJson(response);
+    if (!response.ok) {
+      if (isDuplicateOutRefundNo(payload)) {
+        throw new WechatRefundAlreadyAccepted();
+      }
+      const code =
+        typeof payload.code === 'string' ? payload.code : 'HTTP_' + String(response.status);
+      this.logger.warn(`wechat refund failed: ${code}`);
+      throw new BadGatewayException(wechatErrorMessage(payload));
+    }
+    const status = typeof payload.status === 'string' ? payload.status : '';
+    const refundId = typeof payload.refund_id === 'string' ? payload.refund_id : '';
+    if (status !== 'SUCCESS' && status !== 'PROCESSING') {
+      throw new BadGatewayException('微信退款未受理');
+    }
+    return { refundId, status };
   }
 
   async verifyAndDecrypt(
@@ -322,6 +365,18 @@ function parseObject(raw: string, invalidMessage: string): Record<string, unknow
 
 function readString(value: unknown): string | null {
   return typeof value === 'string' && value.length > 0 ? value : null;
+}
+
+function isDuplicateOutRefundNo(payload: Record<string, unknown>): boolean {
+  const code = typeof payload.code === 'string' ? payload.code : '';
+  const message = typeof payload.message === 'string' ? payload.message : '';
+  if (message.includes('不一致')) {
+    return false;
+  }
+  if (code === 'RESOURCE_ALREADY_EXISTS') {
+    return true;
+  }
+  return message.includes('重入') || message.includes('已存在') || message.includes('退款单号重复');
 }
 
 function wechatErrorMessage(payload: Record<string, unknown>): string {
