@@ -1,5 +1,17 @@
-import { BadRequestException } from '@nestjs/common';
+import {
+  BadRequestException,
+  RequestMethod,
+  UnauthorizedException,
+  type ArgumentsHost,
+  type ExecutionContext,
+} from '@nestjs/common';
+import { GUARDS_METADATA, METHOD_METADATA, PATH_METADATA } from '@nestjs/common/constants';
+import { lastValueFrom, of } from 'rxjs';
+import { MiniProgramTokenGuard } from '../src/common/auth/mini-program-token.guard';
+import type { MiniProgramTokenService } from '../src/common/auth/mini-program-token.service';
 import type { ClockService } from '../src/common/clock/clock.service';
+import { AllExceptionsFilter } from '../src/common/http/all-exceptions.filter';
+import { ResponseInterceptor } from '../src/common/http/response.interceptor';
 import {
   enqueueNotify,
   resetNotifyFlusher,
@@ -19,6 +31,7 @@ import {
   type NotifyRecipient,
 } from '../src/modules/notifications/notification-directory';
 import { NotificationDispatchService } from '../src/modules/notifications/notification-dispatch.service';
+import { NotificationSubscribeController } from '../src/modules/notifications/notification-subscribe.controller';
 import {
   NotificationSettingsService,
   type NotificationEventConfig,
@@ -293,6 +306,173 @@ describe('notification settings', () => {
     expect(runtime.sms?.region).toBe('ap-guangzhou');
     expect(runtime.events.refund_result.pagePath).toBeNull();
     expect(runtime.events.wallet_credit_points.enabled).toBe(false);
+  });
+
+  it('returns 401 when the subscribe-template route is called without a login', async () => {
+    expect(Reflect.getMetadata(GUARDS_METADATA, NotificationSubscribeController)).toEqual([
+      MiniProgramTokenGuard,
+    ]);
+    expect(Reflect.getMetadata(PATH_METADATA, NotificationSubscribeController)).toBe(
+      'notifications',
+    );
+    expect(
+      Reflect.getMetadata(
+        PATH_METADATA,
+        NotificationSubscribeController.prototype.subscribeTemplates,
+      ),
+    ).toBe('subscribe-templates');
+    expect(
+      Reflect.getMetadata(
+        METHOD_METADATA,
+        NotificationSubscribeController.prototype.subscribeTemplates,
+      ),
+    ).toBe(RequestMethod.GET);
+
+    const guard = new MiniProgramTokenGuard(
+      {} as unknown as MiniProgramTokenService,
+      {} as PrismaService,
+    );
+    const anonymous = {
+      header: () => undefined,
+    };
+    let error: unknown;
+    try {
+      await guard.canActivate({
+        switchToHttp: () => ({ getRequest: () => anonymous }),
+      } as ExecutionContext);
+    } catch (caught) {
+      error = caught;
+    }
+    expect(error).toBeInstanceOf(UnauthorizedException);
+    const response = { status: jest.fn().mockReturnThis(), json: jest.fn() };
+    new AllExceptionsFilter().catch(error, {
+      switchToHttp: () => ({ getResponse: () => response }),
+    } as ArgumentsHost);
+    expect(response.status).toHaveBeenCalledWith(401);
+    expect(response.json).toHaveBeenCalledWith({
+      code: 401,
+      message: '未登录',
+      data: null,
+    });
+
+    const loggedIn: {
+      header: (name: string) => string | undefined;
+      user?: { id: bigint };
+    } = {
+      header: (name: string) => (name === 'authorization' ? 'Bearer session' : undefined),
+    };
+    const memberGuard = new MiniProgramTokenGuard(
+      { verify: async () => ({ sub: 4n }) } as unknown as MiniProgramTokenService,
+      {
+        user: {
+          findUnique: async () => ({
+            id: 4n,
+            nickname: '访客',
+            phone: null,
+            status: 'active',
+            member: false,
+          }),
+        },
+      } as unknown as PrismaService,
+    );
+    await expect(
+      memberGuard.canActivate({
+        switchToHttp: () => ({ getRequest: () => loggedIn }),
+      } as ExecutionContext),
+    ).resolves.toBe(true);
+    expect(loggedIn.user?.id).toBe(4n);
+  });
+
+  it('lists requestable wechat templates and omits the sms secret', async () => {
+    const db = memorySettings();
+    const service = settingsService(db);
+    const controller = new NotificationSubscribeController(service);
+
+    expect(await controller.subscribeTemplates()).toEqual({ templates: [] });
+
+    await service.update(
+      {
+        sms: {
+          secretId: 'AKIDtest',
+          secretKey: SECRET,
+          sdkAppId: '1400',
+          signName: '奥瑞尔',
+        },
+        events: [
+          {
+            event: 'refund_result',
+            enabled: true,
+            wechatTemplateId: 'wx-tpl-refund',
+            smsTemplateId: '1001',
+            pagePath: 'pages/order/refunds',
+          },
+          {
+            event: 'lucky_return_credited',
+            enabled: true,
+            wechatTemplateId: 'wx-tpl-lucky',
+          },
+          {
+            event: 'withdrawal_outcome',
+            enabled: false,
+            wechatTemplateId: 'wx-tpl-withdraw',
+          },
+          {
+            event: 'wallet_credit_points',
+            enabled: true,
+            smsTemplateId: '1002',
+          },
+          {
+            event: 'wallet_credit_withdrawable',
+            enabled: true,
+            wechatTemplateId: '',
+          },
+        ],
+      },
+      9n,
+    );
+
+    const unset = await controller.subscribeTemplates();
+    expect(unset).toEqual({ templates: [] });
+
+    await service.update({ deliveryMode: 'sms' }, 9n);
+    const smsOnly = await controller.subscribeTemplates();
+    expect(smsOnly).toEqual({ templates: [] });
+    expect(JSON.stringify(smsOnly)).not.toContain(SECRET);
+
+    await service.update({ deliveryMode: 'wechat' }, 9n);
+    const wechat = await controller.subscribeTemplates();
+    expect(wechat).toEqual({
+      templates: [
+        { event: 'refund_result', templateId: 'wx-tpl-refund', page: 'pages/order/refunds' },
+        { event: 'lucky_return_credited', templateId: 'wx-tpl-lucky', page: 'pages/mine/index' },
+      ],
+    });
+
+    await service.update({ deliveryMode: 'both' }, 9n);
+    const both = await controller.subscribeTemplates();
+    const wire = await lastValueFrom(
+      new ResponseInterceptor().intercept({} as never, { handle: () => of(both) }),
+    );
+    expect(wire).toEqual({
+      code: 0,
+      message: 'ok',
+      data: {
+        templates: [
+          { event: 'refund_result', templateId: 'wx-tpl-refund', page: 'pages/order/refunds' },
+          { event: 'lucky_return_credited', templateId: 'wx-tpl-lucky', page: 'pages/mine/index' },
+        ],
+      },
+    });
+    const serialized = JSON.stringify(wire);
+    expect(serialized).not.toContain(SECRET);
+    expect(serialized).not.toContain('AKIDtest');
+    expect(serialized).not.toContain('1001');
+    expect(serialized).not.toContain('1002');
+    expect(serialized).not.toContain('wx-tpl-withdraw');
+    expect(Object.keys(both)).toEqual(['templates']);
+    for (const template of both.templates) {
+      expect(Object.keys(template).sort()).toEqual(['event', 'page', 'templateId']);
+    }
   });
 });
 

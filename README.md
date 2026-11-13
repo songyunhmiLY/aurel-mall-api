@@ -864,6 +864,26 @@ BullMQ 队列 `due-jobs` 大约每 30 秒触发一次，进程启动时也会跑
 
 `sms` 可带 `secretId`、`secretKey`、`sdkAppId`、`signName`、`region`。`events` 的每一项至少带 `event`，其余字段可选：`enabled`、`wechatTemplateId`、`smsTemplateId`、`pagePath`、`slots`。模板 ID 或 `pagePath` 传空字符串表示清空。`slots` 传数组会整组替换，形如 `{ "channel": "wechat", "slot": "amount1", "field": "amount" }`。
 
+已登录用户可以读取当前能向微信申请授权的订阅模板，供小程序调用 `wx.requestSubscribeMessage`。不检查是否会员。这不是消息列表，也不是已读接口，也没有会员端的推送设置页。
+
+- `GET /api/v1/notifications/subscribe-templates`。需要小程序登录令牌，不检查是否会员。未登录返回 401，`{ "code": 401, "message": "未登录", "data": null }`。
+
+成功时沿用 `{ "code": 0, "message": "ok", "data": ... }`。`data` 只有 `templates`：
+
+```json
+{
+  "templates": [
+    {
+      "event": "refund_result",
+      "templateId": "微信订阅消息模板 ID",
+      "page": "pages/order/refunds"
+    }
+  ]
+}
+```
+
+`templates` 按上面的事件顺序，只包含同时满足这三项的事件：事件开关已开、全局 `deliveryMode` 是 `wechat` 或 `both`、微信模板 ID 非空。`deliveryMode` 为 `sms`、空或尚未设置时返回 `"templates": []`，不是错误。事件关闭，或没有微信模板 ID，也不出现在列表里。`page` 未配置时是 `pages/mine/index`，与发送时相同。响应里没有短信密钥、SecretId、短信模板或其他管理端配置。
+
 没有会员端的消息列表或已读接口。
 
 ## 微信支付
