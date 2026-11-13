@@ -1,4 +1,5 @@
 /// status: draft / on / off。
+/// linkUrl 存点击后打开的小程序页面路径，不是网页地址。
 model Banner {
   id        BigInt   @id @default(autoincrement())
   title     String   @db.VarChar(128)
@@ -13,9 +14,11 @@ model Banner {
   @@map("banners")
 }
 
-/// status: draft / published / off。publishedAt 由应用写入。
+/// kind: article 文章 / news 新闻 / notice 通知。
+/// status: draft / published / off。publishedAt 由应用在发布时写入。
 model Article {
   id          BigInt    @id @default(autoincrement())
+  kind        String    @db.VarChar(32)
   title       String    @db.VarChar(200)
   summary     String    @db.VarChar(500)
   body        String    @db.Text
@@ -26,9 +29,11 @@ model Article {
   updatedAt   DateTime  @map("updated_at") @db.DateTime(3)
 
   @@index([status, publishedAt], map: "articles_status_published_idx")
+  @@index([kind, status, publishedAt], map: "articles_kind_status_published_idx")
   @@map("articles")
 }
 
+/// status: draft / on / off。
 model Ticker {
   id        BigInt   @id @default(autoincrement())
   content   String   @db.VarChar(255)

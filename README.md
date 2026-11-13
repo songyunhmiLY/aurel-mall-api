@@ -1,6 +1,6 @@
 # 奥瑞尔经销商城 API
 
-经销商城后端。当前包含工程骨架、业务时钟、管理员登录、小程序登录、实名、收货地址、商品上下架、订单支付、三个钱包账户、消费账户划转、提现审核、商城退款审核、创业专区支付成功后的入座、报单与全网公排、创业专区和商城奖励、月度职位分红、创业团队页、福利专场（抢红包）、联合创始人、工作室补贴、运营团队分红、管理端运营总览，以及微信支付下单与回调。购物车和消息推送还没做。
+经销商城后端。当前包含工程骨架、业务时钟、管理员登录、小程序登录、实名、收货地址、商品上下架、订单支付、三个钱包账户、消费账户划转、提现审核、商城退款审核、创业专区支付成功后的入座、报单与全网公排、创业专区和商城奖励、月度职位分红、创业团队页、福利专场（抢红包）、联合创始人、工作室补贴、运营团队分红、管理端运营总览、首页轮播图、资讯知识和滚动字幕，以及微信支付下单与回调。购物车和消息推送还没做。
 
 同级仓库：
 
@@ -104,7 +104,7 @@ src/
     orders/               # 下单、支付拆分、发货
     payments/             # 微信支付下单、回调、商户配置
     wallet/               # 积分、可提现、消费账户、划转、提现
-    cms/                  # Banner / 文章 / 滚动条占位
+    cms/                  # 首页轮播图、资讯和知识、滚动字幕
     rewards/              # 报单、奖励、市场业绩、职位分红、创业团队、福利专场
     cofounder/            # 联合创始人开通、分红和取消审核
     studio/               # 工作室指定、取消和补贴
@@ -125,7 +125,7 @@ docs/er.md                # 逻辑 ER 图
 - 失败：HTTP 状态与 `code` 相同，`message` 为原因，`data` 一般为 `null`
 - 健康检查：`GET /api/v1/health`
 
-对外业务路由包括健康检查、时钟、管理员登录、小程序登录、实名、收货地址、商品、钱包余额和流水、消费账户划转、提现、商城退款、订单支付、发货、微信支付、创业团队、福利专场、联合创始人，以及管理端的邀请关系、市场树、报单、奖励、职位分红、会员钱包查询、福利专场、联合创始人、工作室、运营团队和运营总览。购物车还没有接口。会员端没有工作室开通接口，也没有运营团队开通或身份入口。会员端没有幸运返还、奖励明细、我的职位或邀请关系列表，这些金额出现在可提现分类里，关系和管理明细只给管理端。会员端福利专场只返回能不能报名、今天有没有报过名，不返回上限和已领金额。会员端联合创始人身份只出现在联合创始人入口，不出现在登录资料里。运营团队分红只出现在可提现账户，不出现在登录资料里。会员端也不提供运营总览，不能靠这个接口轮询资金。JSON 里的 bigint 编号和金额里的 bigint 都是十进制字符串。
+对外业务路由包括健康检查、时钟、管理员登录、小程序登录、实名、收货地址、商品、钱包余额和流水、消费账户划转、提现、商城退款、订单支付、发货、微信支付、创业团队、福利专场、联合创始人、首页轮播图、资讯知识和滚动字幕，以及管理端的邀请关系、市场树、报单、奖励、职位分红、会员钱包查询、福利专场、联合创始人、工作室、运营团队、运营总览和首页内容。购物车还没有接口。会员端没有工作室开通接口，也没有运营团队开通或身份入口。会员端没有幸运返还、奖励明细、我的职位或邀请关系列表，这些金额出现在可提现分类里，关系和管理明细只给管理端。会员端福利专场只返回能不能报名、今天有没有报过名，不返回上限和已领金额。会员端联合创始人身份只出现在联合创始人入口，不出现在登录资料里。运营团队分红只出现在可提现账户，不出现在登录资料里。会员端也不提供运营总览，不能靠这个接口轮询资金。会员端首页轮播、字幕和资讯不要求会员资格。JSON 里的 bigint 编号和金额里的 bigint 都是十进制字符串。
 
 ## 认证
 
@@ -389,7 +389,7 @@ T **不是**锁定项。单位是分，比较的是市场里创业专区已支�
 
 ## 福利专场（抢红包）
 
-首页入口的文案和图片由管理员配置，存在 `admin_settings` 的 `welfare_entry_copy`、`welfare_entry_image_url`。K、C 和奖池比例不在这个接口里。内容模块的 Banner 表还没有接口，这里不另做一套首页内容系统。
+首页入口的文案和图片由管理员配置，存在 `admin_settings` 的 `welfare_entry_copy`、`welfare_entry_image_url`。K、C 和奖池比例不在这个接口里。轮播图、资讯和滚动字幕是另一套首页内容，见下文。
 
 需要用户令牌：
 
@@ -421,6 +421,31 @@ T **不是**锁定项。单位是分，比较的是市场里创业专区已支�
 参与记录有 `eligible`、`actualPayFen`、`openedRoundCount`、`claimCapFen`、`cumulativeClaimedFen`、`currentRoundNo`、`currentRoundClaimedFen`、`signedUpToday`。金额是十进制字符串。`currentRoundClaimedFen` 是本轮已领额度：已领金额按每轮 C 依次填充，正好领满时算在刚领满的那一轮，而不是下一轮的 0。若这个轮次号大于已开轮数，表示超额已经占着尚未开启的下一轮。这个边界展示还没有单独的官方句子，字段本身可以据此重算。
 
 不传 `userId` 时，参与列表只翻已入座会员。传入 `userId` 时返回这个用户，包括还不是会员的人。
+
+## 首页内容
+
+管理端维护首页的轮播图、资讯和知识、滚动字幕。这些不是第 1.1 节的锁定运行配置。会员端只读当前可见内容，不要求会员资格；未登录仍返回 401「未登录」。停用账号沿用登录守卫，返回 401「登录已失效」。
+
+需要用户令牌：
+
+- `GET /api/v1/home/banners`。`data.items` 为当前 `status = on` 且已填写跳转页面的轮播图，按 `sortOrder` 升序、`id` 升序。每项有 `id`、`title`、`imageUrl`、`pagePath`、`sortOrder`。不分页。
+- `GET /api/v1/home/tickers`。`data.items` 为当前 `status = on` 的滚动字幕，排序同上。每项有 `id`、`content`、`sortOrder`。不分页。
+- `GET /api/v1/home/articles?kind=&page=&pageSize=`。只返回 `status = published` 的资讯。`kind` 可省略；传入时只能是 `article`（文章）、`news`（新闻）、`notice`（通知）。按 `publishedAt` 降序、`id` 降序。列表项有 `id`、`kind`、`title`、`summary`、`coverUrl`、`publishedAt`，不含正文。
+- `GET /api/v1/home/articles/:id`。已发布内容的详情，比列表多 `body`。草稿、下架或不存在都是 404「内容不存在」。
+
+需要管理员令牌。三种内容都支持列表、详情、创建、更新和下架。下架不删除行。
+
+- 轮播图：`GET|POST /api/v1/admin/home/banners`，`GET|PUT /api/v1/admin/home/banners/:id`，`POST /api/v1/admin/home/banners/:id/status`
+- 滚动字幕：把上面路径里的 `banners` 换成 `tickers`
+- 资讯：换成 `articles`。列表还可按 `kind` 筛选
+
+创建轮播图的 body：`{ "title", "imageUrl", "pagePath", "sortOrder", "status" }`。`sortOrder` 省略时为 0。`status` 省略时为 `draft`，也可传 `draft`、`on`、`off`。`imageUrl` 必须是 http 或 https，最长 512。`pagePath` 是小程序页面路径，最长 512，不能是 `http://` 或 `https://`。标题最长 128。更新 body 只带要改的字段，不改状态。状态下架传 `{ "status": "off" }`，也可以改回 `draft` 或 `on`。
+
+创建滚动字幕的 body：`{ "content", "sortOrder", "status" }`。文案最长 255。状态与轮播图相同。
+
+创建资讯的 body：`{ "kind", "title", "summary", "body", "coverUrl", "status" }`。`kind` 必填，取值同上。标题最长 200，摘要最长 500，正文最长 20000。`coverUrl` 可省略、传空或 `null`。`status` 省略时为 `draft`；传 `published` 时用业务时钟写入 `publishedAt`。更新不改状态，也不改 `publishedAt`。`POST .../status` 的 `status` 为 `draft`、`published` 或 `off`。从非发布改成 `published` 时，用当时的业务时钟重写 `publishedAt`。下架保留原来的 `publishedAt`。没有定时发布。
+
+管理端列表带 `page`、`pageSize`，默认第 1 页、每页 20，最大 100。轮播图和字幕还可按 `status` 筛选。返回 `items`、`total`、`page`、`pageSize`。管理端详情比会员端多 `status`、`createdAt`、`updatedAt`；资讯详情始终含 `body`，未发布时 `publishedAt` 为 `null`。编号是十进制字符串。不存在时：轮播图 404「轮播图不存在」，字幕 404「滚动字幕不存在」，资讯 404「资讯不存在」。
 
 ## 钱包
 
@@ -831,4 +856,4 @@ Schema 在 `prisma/schema/`，初始迁移在 `prisma/schema/migrations/`。没�
 
 表按域拆开：用户与身份、地址、管理员、商品与库存、订单与支付、钱包流水、Banner / 文章 / 滚动条、邀请树、市场树、报单、奖励流水、职位、红包、联合创始人、工作室、运营团队、管理员配置。
 
-状态字段是字符串，由应用写入，数据库不设业务默认值。用户状态是 `active` / `disabled`，商品状态是 `draft` / `on` / `off`，实名状态是 `verified`。管理员状态是 `active`，订单状态使用 `pending_payment` / `paid` / `shipped` / `closed`，微信支付状态使用 `pending` / `success` / `failed`，钱包冻结状态使用 `held` / `captured` / `released`。账户类型是 `points` / `withdrawable` / `consumption`。其余注释里的状态仍是预留。
+状态字段是字符串，由应用写入，数据库不设业务默认值。用户状态是 `active` / `disabled`，商品状态是 `draft` / `on` / `off`，实名状态是 `verified`。管理员状态是 `active`，订单状态使用 `pending_payment` / `paid` / `shipped` / `closed`，微信支付状态使用 `pending` / `success` / `failed`，钱包冻结状态使用 `held` / `captured` / `released`。账户类型是 `points` / `withdrawable` / `consumption`。首页轮播图和滚动字幕是 `draft` / `on` / `off`，资讯是 `draft` / `published` / `off`，资讯类型是 `article` / `news` / `notice`。其余注释里的状态仍是预留。

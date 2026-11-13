@@ -382,6 +382,9 @@ export class Stage1Db {
   readonly opsTeamSeat = new MemoryTable([['slot']]);
   readonly opsTeamEnrollment = new MemoryTable([['activeSlot']]);
   readonly opsTeamAccrual = new MemoryTable([['orderId']]);
+  readonly banner = new MemoryTable([]);
+  readonly article = new MemoryTable([]);
+  readonly ticker = new MemoryTable([]);
 
   async $queryRaw(
     strings: TemplateStringsArray,
@@ -544,6 +547,9 @@ export class Stage1Db {
       this.opsTeamSeat,
       this.opsTeamEnrollment,
       this.opsTeamAccrual,
+      this.banner,
+      this.article,
+      this.ticker,
     ];
   }
 }

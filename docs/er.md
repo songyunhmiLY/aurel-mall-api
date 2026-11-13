@@ -215,7 +215,7 @@ erDiagram
 
 ## 5. 内容
 
-Banner、文章、滚动条彼此没有关联。
+Banner、文章、滚动条彼此没有关联。`banners.link_url` 存点击后打开的小程序页面路径。文章 `kind` 为 `article`（文章）、`news`（新闻）或 `notice`（通知）。
 
 ```mermaid
 erDiagram
@@ -229,6 +229,7 @@ erDiagram
   }
   articles {
     bigint id PK
+    varchar kind
     varchar title
     text body
     varchar status
