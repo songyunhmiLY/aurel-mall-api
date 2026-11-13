@@ -1,6 +1,6 @@
 # 奥瑞尔经销商城 API
 
-经销商城后端。当前包含工程骨架、业务时钟、管理员登录、小程序登录、实名、收货地址、商品上下架、订单支付、三个钱包账户、消费账户划转、提现审核、商城退款审核、创业专区支付成功后的入座、报单与全网公排、创业专区和商城奖励、月度职位分红、创业团队页、福利专场（抢红包）、管理端运营总览，以及微信支付下单与回调。购物车、联合创始人、工作室、运营团队和消息推送还没做。
+经销商城后端。当前包含工程骨架、业务时钟、管理员登录、小程序登录、实名、收货地址、商品上下架、订单支付、三个钱包账户、消费账户划转、提现审核、商城退款审核、创业专区支付成功后的入座、报单与全网公排、创业专区和商城奖励、月度职位分红、创业团队页、福利专场（抢红包）、联合创始人、管理端运营总览，以及微信支付下单与回调。购物车、工作室、运营团队和消息推送还没做。
 
 同级仓库：
 
@@ -106,9 +106,10 @@ src/
     wallet/               # 积分、可提现、消费账户、划转、提现
     cms/                  # Banner / 文章 / 滚动条占位
     rewards/              # 报单、奖励、市场业绩、职位分红、创业团队、福利专场
+    cofounder/            # 联合创始人开通、分红和取消审核
     ops/                  # 管理端运营总览（只读）
     settings/             # 营销经理门槛 T（下月生效）
-  jobs/                   # 按业务时钟跑每日报单检查、职位分红和前一日红包结算
+  jobs/                   # 按业务时钟跑每日报单检查、职位分红、前一日红包和联合创始人定期分配
 prisma/schema/            # 多文件 schema，无外键
 docs/er.md                # 逻辑 ER 图
 ```
@@ -122,7 +123,7 @@ docs/er.md                # 逻辑 ER 图
 - 失败：HTTP 状态与 `code` 相同，`message` 为原因，`data` 一般为 `null`
 - 健康检查：`GET /api/v1/health`
 
-对外业务路由包括健康检查、时钟、管理员登录、小程序登录、实名、收货地址、商品、钱包余额和流水、消费账户划转、提现、商城退款、订单支付、发货、微信支付、创业团队、福利专场，以及管理端的邀请关系、市场树、报单、奖励、职位分红、会员钱包查询、福利专场和运营总览。购物车和联合创始人分红还没有接口。会员端没有幸运返还、奖励明细、我的职位或邀请关系列表，这些金额出现在可提现分类里，关系和管理明细只给管理端。会员端福利专场只返回能不能报名、今天有没有报过名，不返回上限和已领金额。会员端也不提供运营总览，不能靠这个接口轮询资金。JSON 里的 bigint 编号和金额里的 bigint 都是十进制字符串。
+对外业务路由包括健康检查、时钟、管理员登录、小程序登录、实名、收货地址、商品、钱包余额和流水、消费账户划转、提现、商城退款、订单支付、发货、微信支付、创业团队、福利专场、联合创始人，以及管理端的邀请关系、市场树、报单、奖励、职位分红、会员钱包查询、福利专场、联合创始人和运营总览。购物车还没有接口。会员端没有幸运返还、奖励明细、我的职位或邀请关系列表，这些金额出现在可提现分类里，关系和管理明细只给管理端。会员端福利专场只返回能不能报名、今天有没有报过名，不返回上限和已领金额。会员端联合创始人身份只出现在联合创始人入口，不出现在登录资料里。会员端也不提供运营总览，不能靠这个接口轮询资金。JSON 里的 bigint 编号和金额里的 bigint 都是十进制字符串。
 
 ## 认证
 
@@ -172,7 +173,7 @@ docs/er.md                # 逻辑 ER 图
 
 - `wechatCashInFen`、`wechatCashRefundedFen`、`netCashFen`：与顶部微信现金相同。净额可以是负数，表示本区间的实退多于实收。
 - `withdrawalPayoutFen`：现金流水里 `withdrawal_payout` 的实付合计，不从净额里扣。
-- `cofounderActivationFen`：联合创始人开通里实际走微信的收款。当前没有这笔支付记录，固定 `"0"`，不并进商品实收，也不把可提现账户里的 `cofounder` 入账当成现金。
+- `cofounderActivationFen`：联合创始人开通里实际走微信的收款，来自现金流水 `inflow` / `cofounder_activation`。不并进商品实收，也不把可提现账户里的 `cofounder` 入账当成现金。没有开通收款时为 `"0"`。
 
 `data.withdrawals`：
 
@@ -362,12 +363,13 @@ curl -X DELETE http://127.0.0.1:3000/api/v1/internal/clock/override
 | 福利专场当日奖池比例 | `RED_PACKET_DAILY_ACCRUAL_BPS` | `300`（3%，需求示例） |
 | 福利专场实付门槛 K | `RED_PACKET_ROUND_PAY_THRESHOLD_FEN` | `500000`（需求示例 5000 元） |
 | 福利专场每轮领取上限 C | `RED_PACKET_ROUND_CLAIM_CAP_FEN` | `800000`（需求示例 8000 元） |
-| 联合创始人 / 工作室 / 运营团队分红比例 | `COFOUNDER_DIVIDEND_RATIO_BPS`、`STUDIO_DIVIDEND_RATIO_BPS`、`OPERATIONS_TEAM_DIVIDEND_RATIO_BPS` | `3000` / `2000` / `1000`（占位，本阶段不结算） |
+| 联合创始人分红比例 | `COFOUNDER_DIVIDEND_RATIO_BPS`，可选 `COFOUNDER_STARTUP_DIVIDEND_RATIO_BPS`、`COFOUNDER_MALL_DIVIDEND_RATIO_BPS` | `200`（2%，官方示例）。两条可选变量留空时都用前一项。原先示例 `3000` 是未结算占位 |
+| 工作室 / 运营团队分红比例 | `STUDIO_DIVIDEND_RATIO_BPS`、`OPERATIONS_TEAM_DIVIDEND_RATIO_BPS` | `2000` / `1000`（占位，本阶段不结算） |
 | 提现手续费 | `WITHDRAWAL_FEE_FEN` | `0`（示例，正式金额未确认） |
 
 两组钱包拆分都是可提现、积分、消费三项，必须合计 `10000`。对不上，或每日检查时间不是 `HH:mm` 时，进程拒绝启动。创业专区的销售奖和见点奖共用创业奖拆分。商城销售奖、商城见点奖和职位分红共用商城拆分。职位池按配置顺序从低到高：第一档是营销经理，不与同时达到更高职位的人叠加；更高档包含同时达到更高职位的人。各档万分比不必合计 `10000`，没有合格会员的那一档留在系统里。
 
-`FILING_DAILY_CHECK_TIME` 只在进程启动时读入，没有管理端修改接口，也不写入 `admin_settings`。福利专场用这同一个钟点结算前一个上海自然日，不另设时间。K、C 和奖池比例也只在启动时读入。联合创始人比例和提现手续费仍是占位，本阶段不按它们结算。启动时会按职位池编码写入 `positions`。已知编码的显示名是营销经理、高级经理、营销总监、高级总监、首席。启动时如果库里已经有旧显示名，会改成这五个。换成其他编码时显示名就是编码本身。
+`FILING_DAILY_CHECK_TIME` 只在进程启动时读入，没有管理端修改接口，也不写入 `admin_settings`。福利专场用这同一个钟点结算前一个上海自然日，不另设时间。K、C 和奖池比例也只在启动时读入。联合创始人的两条分红比例同样只在启动时读入，管理端不能改。工作室和运营团队比例仍不结算。提现手续费按锁定配置在打款时扣除。启动时会按职位池编码写入 `positions`。已知编码的显示名是营销经理、高级经理、营销总监、高级总监、首席。启动时如果库里已经有旧显示名，会改成这五个。换成其他编码时显示名就是编码本身。
 
 ## 营销经理市场门槛 T
 
@@ -701,9 +703,50 @@ T **不是**锁定项。单位是分，比较的是市场里创业专区已支�
 
 用户不存在返回 404「用户不存在」。`walletType` 不是 `points`、`withdrawable`、`consumption` 时返回 400。
 
+## 联合创始人
+
+同一会员以后还可以同时是工作室或运营团队。这一阶段只做联合创始人，数据上不占用那两个身份。运营团队仍是以后的事，这里不限制一个账号能不能再持有它。
+
+创业专区基数是订单 `goods_total_fen`（N × 件数，含钱包支付的货款，不含运费，不用 `wechat_fen`）。商城基数是订单 `pv_fen`。比例分别是 `cofounderStartupDividendRatioBps` 和 `cofounderMallDividendRatioBps`。金额向下取整。100% 进入可提现账户，来源 `cofounder`，新库显示名是「系统奖励」。购买人自己如果当时在籍，也参与均分。
+
+均分用整数除法。每人份额 × 人数不会超过本次金额，余数留在系统，不结转到下一笔。需求没有写余数，这是待确认的实现选择。没人在籍时，这笔不发给任何人，也留在系统。
+
+四种分配方式互斥，默认是即时分配。这个默认需求没有写明，待确认。
+
+1. `immediate`：每笔合格订单当时均分，不进累计池。
+2. `periodic`：订单先进入同一个池子。到管理端配置的上海钟点，把池子全部分完再清零。周期是 `daily`、`weekly`、`monthly` 或 `interval`。每周用 `weekday`（周一 1，周日 7）。每月用 `monthDay`；该月没有这一天时用最后一天，待确认。`interval` 从 `anchorDate` 起每 `intervalDays` 天一次。
+3. `pool_total`：池子达到 `poolThresholdFen` 时，把当时的全部金额分完。从 19999 到 20001 会分 20001，不是只分 20000。
+4. `per_person`：每来一笔后，用池子除以当时在籍人数的整数份额和 `perPersonThresholdFen` 比较。达到后把整个池子分完。
+
+改分配方式，或在定期分配下改周期、钟点、星期、月日、间隔或锚点时，先处理池子里已有的钱：有在籍的人就立刻分完并清零；没有人就把钱留在系统再清零。原来是即时分配且池子本来就是空的，直接切换。切到定期分配时，已经过去的那一档记成处理过，避免刚切换就再发一次。只把池子总额或人均门槛改低、且已经达到新门槛时，也会按新规则分掉当前池子。这是待确认的实现选择。
+
+取消不写退款，也不动钱包。取消后用户端「成为联合创始人」按钮关掉，要管理员再打开。名额没满时按钮也不会因为有人退出而自己打开。名额满了用户不能支付开通，管理员仍可指定，在籍人数可以超过上限。取消后再开通会新写一行在籍记录，待确认。
+
+开通费只走微信支付。会员点开通后复用 `POST /api/v1/payments/wechat/prepay` 同一套预下单、回调和 `POST /api/v1/payments/wechat/sandbox/succeed`。商户资料没配齐时返回沙箱预支付，不会直接入籍。已配齐但没有 `WECHAT_PAY_NOTIFY_URL` 时拒绝下单。成功后立刻在籍，并写一条现金流入 `cofounder_activation`。不生成商品订单。积分、可提现、消费账户不能抵开通费。
+
+需要会员令牌：
+
+- `GET /api/v1/me/cofounder`：入口文案和图片、介绍页标题正文和图片、`enrolled`、`enrolledAt`、`source`、`button`（`available`、`reason`）、`seatCap`、`enrolledCount`、`activationAmountFen`、未完成的 `pendingActivation`。`reason` 为 `already_enrolled`、`not_member`、`cap_full`、`closed`、`amount_unset`、`open`。已在籍时客户端可以显示「你已是联合创始人」。
+- `POST /api/v1/me/cofounder/activations`：发起开通。成功时 `data` 是微信支付预下单，另加 `activationId`。`purpose` 为 `cofounder_activation`，`orderId` 为 null。随后用返回的 `payNo` 走现有沙箱成功或微信回调。
+
+需要管理员令牌：
+
+- `GET /api/v1/admin/cofounder/settings`、`PUT /api/v1/admin/cofounder/settings`
+- `GET /api/v1/admin/cofounder/content`、`PUT /api/v1/admin/cofounder/content`
+- `GET /api/v1/admin/cofounders?status=&page=&pageSize=`
+- `POST /api/v1/admin/cofounders`，body：`{ "userId": "1" }`，指定在籍，可以超过名额
+- `GET /api/v1/admin/cofounders/:userId/cancellation`：按奖励类型的累计入账、联合创始人分红、当前可提现余额、已提现笔数和明细。不执行退款
+- `POST /api/v1/admin/cofounders/:userId/cancel`：取消身份。在籍人数减 1，并关闭用户端按钮
+
+设置 body：`seatCap`、`userButtonOpen`、`activationAmountFen`、`payoutMode`（`immediate` / `periodic` / `pool_total` / `per_person`）、`schedule`（`cycle`、`time`、`weekday`、`monthDay`、`intervalDays`、`anchorDate`）、`poolThresholdFen`、`perPersonThresholdFen`。金额是十进制字符串。返回里另有 `enrolledCount`、`poolFen` 和只读的 `lockedRates`。多写分红比例会被拒绝。
+
+内容 body：`entryCopy`、`entryImageUrls`、`introTitle`、`introBody`、`introImageUrls`。
+
+新库默认：名额 100、按钮关闭、开通金额 0、即时分配、每天 00:00。名额示例 100 来自需求。按钮默认关闭、金额默认 0、分配方式默认即时、钟点默认 00:00，需求没有写死，待确认。开通金额为 0 时按钮原因是 `amount_unset`，不能下单。
+
 ## 定时任务
 
-BullMQ 队列 `due-jobs` 大约每 30 秒触发一次，进程启动时也会跑一次。任务只调用 `ClockService.now()` 决定有没有到点，不把操作系统时间当成业务日。每日报单检查和职位分红发放都可以重复执行：已经报过的自然日、已经入账的业务号、已经写过的分红记录不会再记一笔。
+BullMQ 队列 `due-jobs` 大约每 30 秒触发一次，进程启动时也会跑一次。任务只调用 `ClockService.now()` 决定有没有到点，不把操作系统时间当成业务日。每日报单检查、职位分红、红包结算和联合创始人定期分配都可以重复执行：已经报过的自然日、已经入账的业务号、已经处理过的发放档期不会再记一笔。联合创始人的钟点来自管理端配置，不是锁定的 `00:01`。
 
 ## 微信支付
 
@@ -729,6 +772,6 @@ BullMQ 队列 `due-jobs` 大约每 30 秒触发一次，进程启动时也会跑
 
 Schema 在 `prisma/schema/`，初始迁移在 `prisma/schema/migrations/`。没有强制外键。逻辑关系和基数见 [docs/er.md](docs/er.md)，同目录有 SVG / PNG。
 
-表按域拆开：用户与身份、地址、管理员、商品与库存、订单与支付、钱包流水、Banner / 文章 / 滚动条、邀请树、市场树、报单、奖励流水、职位、红包、管理员配置。
+表按域拆开：用户与身份、地址、管理员、商品与库存、订单与支付、钱包流水、Banner / 文章 / 滚动条、邀请树、市场树、报单、奖励流水、职位、红包、联合创始人、管理员配置。
 
 状态字段是字符串，由应用写入，数据库不设业务默认值。用户状态是 `active` / `disabled`，商品状态是 `draft` / `on` / `off`，实名状态是 `verified`。管理员状态是 `active`，订单状态使用 `pending_payment` / `paid` / `shipped` / `closed`，微信支付状态使用 `pending` / `success` / `failed`，钱包冻结状态使用 `held` / `captured` / `released`。账户类型是 `points` / `withdrawable` / `consumption`。其余注释里的状态仍是预留。

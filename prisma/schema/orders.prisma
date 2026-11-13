@@ -58,10 +58,15 @@ model OrderItem {
 }
 
 /// channel: wechat。status: pending / success / failed。时间由应用写入。
-/// active_slot 在待支付时为 order:{orderId}，终态清空，保证同一订单同时只有一笔待支付。
+/// purpose: order 商品订单 / cofounder_activation 联合创始人开通。开通单没有订单。
+/// active_slot 在待支付时为 order:{orderId} 或 cofounder:{userId}，终态清空。
 model Payment {
   id             BigInt    @id @default(autoincrement())
-  orderId        BigInt    @map("order_id")
+  orderId        BigInt?   @map("order_id")
+  /// order / cofounder_activation。旧行默认 order。
+  purpose        String    @default("order") @db.VarChar(32)
+  /// 联合创始人开通的付款人。商品订单仍以 orders.user_id 为准，这里可空。
+  userId         BigInt?   @map("user_id")
   payNo          String    @unique(map: "payments_pay_no_uq") @map("pay_no") @db.VarChar(64)
   channel        String    @db.VarChar(32)
   amountFen      Int       @map("amount_fen")
@@ -75,6 +80,7 @@ model Payment {
 
   @@index([orderId], map: "payments_order_id_idx")
   @@index([status], map: "payments_status_idx")
+  @@index([userId, purpose, status], map: "payments_user_purpose_status_idx")
   @@map("payments")
 }
 

@@ -125,6 +125,28 @@ export function previousShanghaiDate(bizDate: string): string {
   return shanghaiBizDate(new Date(start.getTime() - 24 * 60 * 60 * 1000));
 }
 
+/** 周一为 1，周日为 7。按 Asia/Shanghai 的日历日，不看机器本地时区。 */
+export function shanghaiWeekday(instant: Date): number {
+  const shifted = new Date(instant.getTime() + SHANGHAI_OFFSET_MS);
+  const day = shifted.getUTCDay();
+  return day === 0 ? 7 : day;
+}
+
+export function addShanghaiBizDays(bizDate: string, days: number): string {
+  return shanghaiBizDate(addShanghaiDays(shanghaiAt(bizDate, 0, 0), days));
+}
+
+export function diffShanghaiDays(later: Date, earlier: Date): number {
+  const ms = startOfShanghaiDay(later).getTime() - startOfShanghaiDay(earlier).getTime();
+  return Math.floor(ms / DAY_MS);
+}
+
+/** 该上海月的最后一天是几号。 */
+export function daysInShanghaiMonth(month: string): number {
+  const next = startOfBizMonth(nextBizMonth(month));
+  return Number(shanghaiBizDate(new Date(next.getTime() - 1)).slice(8, 10));
+}
+
 /** 含当天在内、向前共 days 个上海自然日的起点。days = 7 时是今天和前 6 天。 */
 export function startOfRecentShanghaiDays(instant: Date, days: number): Date {
   const start = startOfShanghaiDay(instant);

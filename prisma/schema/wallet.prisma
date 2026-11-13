@@ -140,7 +140,8 @@ model WithdrawalDisplaySource {
   @@map("withdrawal_display_sources")
 }
 
-/// 只追加。微信退款受理和提现打款完成时写入。没有修改接口。
+/// 只追加。微信退款受理、提现打款完成、联合创始人开通微信收款时写入。没有修改接口。
+/// direction: outflow / inflow。开通收款是 inflow，业务类型 cofounder_activation。
 model CashLedgerEntry {
   id         BigInt   @id @default(autoincrement())
   direction  String   @db.VarChar(16)

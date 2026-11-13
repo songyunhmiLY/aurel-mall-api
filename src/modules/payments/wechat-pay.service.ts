@@ -23,8 +23,15 @@ import {
 } from './wechat-pay.gateway';
 import { WechatPaySettingsService } from './wechat-pay-settings.service';
 import { assertPaymentStatus, nextPaymentStatus } from './wechat-pay-state';
-import { WECHAT_PAY_CHANNEL, activePaymentSlot } from './wechat-pay.constants';
+import {
+  PAYMENT_PURPOSE_COFOUNDER,
+  PAYMENT_PURPOSE_ORDER,
+  WECHAT_PAY_CHANNEL,
+  activeCofounderSlot,
+  activePaymentSlot,
+} from './wechat-pay.constants';
 import { OrderPaymentSettler } from '../orders/order-payment.settler';
+import { CofounderActivationSettler } from '../cofounder/cofounder-activation.settler';
 import { IDENTITY_PROVIDERS } from '../users/identity.constants';
 
 const MYSQL_SIGNED_BIGINT_MAX = 9223372036854775807n;
@@ -46,8 +53,9 @@ export interface CreateWechatPrepayInput {
 
 export interface WechatPrepayView {
   mode: 'sandbox' | 'live';
+  purpose: string;
   payNo: string;
-  orderId: string;
+  orderId: string | null;
   amountFen: number;
   status: string;
   appId: string | null;
@@ -61,7 +69,7 @@ export interface WechatPrepayView {
 export interface WechatPaymentResult {
   payNo: string;
   status: string;
-  orderId: string;
+  orderId: string | null;
   amountFen: number;
   orderStatus: string | null;
   succeededAt: string | null;
@@ -94,7 +102,19 @@ export class WechatPayService {
     @Optional()
     @Inject(forwardRef(() => OrderPaymentSettler))
     private readonly settler?: OrderPaymentSettler,
-  ) {}
+    @Optional()
+    @Inject(forwardRef(() => CofounderActivationSettler))
+    activationSettler?: CofounderActivationSettler,
+  ) {
+    this.activationSettler = activationSettler;
+  }
+
+  private activationSettler?: CofounderActivationSettler;
+
+  /** 测试手工装配。Nest 由构造函数注入。 */
+  bindActivationSettler(settler: CofounderActivationSettler): void {
+    this.activationSettler = settler;
+  }
 
   async createPrepay(input: CreateWechatPrepayInput): Promise<WechatPrepayView> {
     const orderId = parseOrderId(input.orderId);
@@ -124,6 +144,7 @@ export class WechatPayService {
     if (!credentials) {
       return {
         mode: 'sandbox',
+        purpose: PAYMENT_PURPOSE_ORDER,
         payNo: payment.payNo,
         orderId: order.id.toString(),
         amountFen: payment.amountFen,
@@ -178,11 +199,146 @@ export class WechatPayService {
     });
     return {
       mode: 'live',
+      purpose: PAYMENT_PURPOSE_ORDER,
       payNo: payment.payNo,
       orderId: order.id.toString(),
       amountFen: payment.amountFen,
       status: 'pending',
       appId,
+      timeStamp,
+      nonceStr,
+      package: `prepay_id=${prepayId}`,
+      signType: 'RSA',
+      paySign,
+    };
+  }
+
+  async ensureCofounderPayment(
+    tx: Prisma.TransactionClient,
+    userId: bigint,
+    amountFen: number,
+    now: Date,
+  ): Promise<{
+    id: bigint;
+    payNo: string;
+    amountFen: number;
+    status: string;
+    prepayId: string | null;
+  }> {
+    if (!Number.isInteger(amountFen) || amountFen <= 0) {
+      throw new BadRequestException('开通金额不正确');
+    }
+    const existing = await tx.payment.findFirst({
+      where: { userId, purpose: PAYMENT_PURPOSE_COFOUNDER, status: 'pending' },
+      orderBy: { id: 'asc' },
+    });
+    if (existing) {
+      if (existing.amountFen !== amountFen) {
+        throw new ConflictException('存在金额不一致的待支付单');
+      }
+      return existing;
+    }
+    try {
+      return await tx.payment.create({
+        data: {
+          orderId: null,
+          purpose: PAYMENT_PURPOSE_COFOUNDER,
+          userId,
+          payNo: createPayNo(now),
+          channel: WECHAT_PAY_CHANNEL,
+          amountFen,
+          status: 'pending',
+          activeSlot: activeCofounderSlot(userId),
+          createdAt: now,
+          updatedAt: now,
+        },
+      });
+    } catch (error) {
+      if (!isUniqueConflict(error)) {
+        throw error;
+      }
+      const raced = await tx.payment.findFirst({
+        where: { userId, purpose: PAYMENT_PURPOSE_COFOUNDER, status: 'pending' },
+        orderBy: { id: 'asc' },
+      });
+      if (!raced || raced.amountFen !== amountFen) {
+        throw new ConflictException('存在金额不一致的待支付单');
+      }
+      return raced;
+    }
+  }
+
+  async presentCofounderPrepay(payNo: string, userId: bigint): Promise<WechatPrepayView> {
+    const credentials = await this.settings.readCredentials();
+    const payment = await this.prisma.payment.findUnique({ where: { payNo } });
+    if (!payment || payment.purpose !== PAYMENT_PURPOSE_COFOUNDER || payment.userId !== userId) {
+      throw new NotFoundException('支付单不存在');
+    }
+    if (payment.status === 'success') {
+      throw new ConflictException('开通费已支付');
+    }
+    if (payment.status !== 'pending') {
+      throw new ConflictException('支付单不在待支付状态');
+    }
+    if (!credentials) {
+      return {
+        mode: 'sandbox',
+        purpose: PAYMENT_PURPOSE_COFOUNDER,
+        payNo: payment.payNo,
+        orderId: null,
+        amountFen: payment.amountFen,
+        status: payment.status,
+        appId: null,
+        timeStamp: null,
+        nonceStr: null,
+        package: null,
+        signType: null,
+        paySign: null,
+      };
+    }
+    const payer = await this.payerForUser(userId, {});
+    const notifyUrl = this.env.wechatPayNotifyUrl;
+    if (!notifyUrl) {
+      throw new BadRequestException('未配置 WECHAT_PAY_NOTIFY_URL，无法向微信支付下单');
+    }
+    let prepayId = payment.prepayId;
+    if (!prepayId) {
+      const created = await this.gateway.createJsapiTransaction({
+        merchantId: credentials.merchantId,
+        privateKeyPem: credentials.privateKeyPem,
+        certificateSerial: credentials.serialNumber,
+        appId: payer.appId,
+        description: '联合创始人开通',
+        outTradeNo: payment.payNo,
+        notifyUrl,
+        amountFen: payment.amountFen,
+        openid: payer.openid,
+      });
+      prepayId = created.prepayId;
+      const updatedAt = await this.clock.now();
+      await this.prisma.payment.update({
+        where: { id: payment.id },
+        data: { prepayId, updatedAt },
+      });
+    }
+    const signedAt = await this.clock.now();
+    const timeStamp = Math.floor(signedAt.getTime() / 1000).toString();
+    const nonceStr = randomBytes(16).toString('hex');
+    const paySign = signJsapiPay({
+      appId: payer.appId,
+      timestamp: timeStamp,
+      nonce: nonceStr,
+      prepayId,
+      privateKeyPem: credentials.privateKeyPem,
+    });
+    return {
+      mode: 'live',
+      purpose: PAYMENT_PURPOSE_COFOUNDER,
+      payNo: payment.payNo,
+      orderId: null,
+      amountFen: payment.amountFen,
+      status: 'pending',
+      appId: payer.appId,
       timeStamp,
       nonceStr,
       package: `prepay_id=${prepayId}`,
@@ -198,7 +354,7 @@ export class WechatPayService {
    */
   private async payerForUser(
     userId: bigint,
-    input: CreateWechatPrepayInput,
+    input: { appId?: string; openid?: string },
   ): Promise<{ appId: string; openid: string }> {
     const identity = await this.prisma.userIdentity.findFirst({
       where: { userId, provider: IDENTITY_PROVIDERS.wechatMini },
@@ -304,6 +460,7 @@ export class WechatPayService {
       return await this.prisma.payment.create({
         data: {
           orderId,
+          purpose: PAYMENT_PURPOSE_ORDER,
           payNo: createPayNo(now),
           channel: WECHAT_PAY_CHANNEL,
           amountFen,
@@ -352,6 +509,21 @@ export class WechatPayService {
         !input.transactionId
       ) {
         throw new BadRequestException('微信支付成功回调缺少 transaction_id');
+      }
+      if ((payment.purpose || PAYMENT_PURPOSE_ORDER) === PAYMENT_PURPOSE_COFOUNDER) {
+        return this.finishActivation(
+          tx,
+          payment,
+          input,
+          now,
+          amountFen,
+          succeededAt,
+          current,
+          next,
+        );
+      }
+      if (payment.orderId === null) {
+        throw new NotFoundException('订单不存在');
       }
       const order = await lockOrder(tx, payment.orderId);
       if (!order) {
@@ -402,26 +574,82 @@ export class WechatPayService {
       );
     });
   }
+
+  private async finishActivation(
+    tx: Prisma.TransactionClient,
+    payment: LockedPayment,
+    input: ApplyTradeInput,
+    now: Date,
+    amountFen: number,
+    succeededAt: Date | null,
+    current: string,
+    next: string,
+  ): Promise<WechatPaymentResult> {
+    if (payment.userId === null) {
+      throw new NotFoundException('支付单不存在');
+    }
+    if (next === current) {
+      return toPaymentResult({ ...payment, amountFen, succeededAt, orderId: null }, null);
+    }
+    const becameSuccess = next === 'success';
+    const becameFailed = next === 'failed' && current === 'pending';
+    if ((becameSuccess || becameFailed) && !this.activationSettler) {
+      throw new InternalServerErrorException('联合创始人结算未就绪');
+    }
+    await tx.payment.update({
+      where: { id: payment.id },
+      data: {
+        status: next,
+        updatedAt: now,
+        activeSlot: null,
+        ...(becameSuccess ? { succeededAt: now } : {}),
+        ...(becameSuccess && input.transactionId ? { channelTradeNo: input.transactionId } : {}),
+      },
+    });
+    if (becameSuccess || becameFailed) {
+      await this.activationSettler?.onPaymentFinished(tx, {
+        paymentId: payment.id,
+        userId: payment.userId,
+        amountFen,
+        succeeded: becameSuccess,
+        now,
+      });
+    }
+    return toPaymentResult(
+      {
+        payNo: payment.payNo,
+        status: next,
+        orderId: null,
+        amountFen,
+        succeededAt: becameSuccess ? now : succeededAt,
+      },
+      null,
+    );
+  }
 }
 
 interface PaymentLockRow {
   id: bigint | number | string;
-  orderId: bigint | number | string;
+  orderId: bigint | number | string | null;
   payNo: string;
   channel: string;
   amountFen: number | string;
   status: string;
   succeededAt: Date | string | null;
+  purpose?: string | null;
+  userId?: bigint | number | string | null;
 }
 
 interface LockedPayment {
   id: bigint;
-  orderId: bigint;
+  orderId: bigint | null;
   payNo: string;
   channel: string;
   amountFen: number | string;
   status: string;
   succeededAt: Date | string | null;
+  purpose: string;
+  userId: bigint | null;
 }
 
 interface LockedOrder {
@@ -441,7 +669,9 @@ async function lockPayment(
       channel,
       amount_fen AS amountFen,
       status,
-      succeeded_at AS succeededAt
+      succeeded_at AS succeededAt,
+      purpose,
+      user_id AS userId
     FROM payments
     WHERE pay_no = ${payNo}
     FOR UPDATE
@@ -450,7 +680,16 @@ async function lockPayment(
   if (!row) {
     return null;
   }
-  return { ...row, id: asBigInt(row.id), orderId: asBigInt(row.orderId) };
+  return {
+    ...row,
+    id: asBigInt(row.id),
+    orderId: row.orderId === null || row.orderId === undefined ? null : asBigInt(row.orderId),
+    purpose:
+      typeof row.purpose === 'string' && row.purpose.length > 0
+        ? row.purpose
+        : PAYMENT_PURPOSE_ORDER,
+    userId: row.userId === null || row.userId === undefined ? null : asBigInt(row.userId),
+  };
 }
 
 async function lockOrder(
@@ -478,7 +717,7 @@ function toPaymentResult(
   payment: {
     payNo: string;
     status: string;
-    orderId: bigint;
+    orderId: bigint | null;
     amountFen: number;
     succeededAt: Date | null;
   },
@@ -487,7 +726,7 @@ function toPaymentResult(
   return {
     payNo: payment.payNo,
     status: payment.status,
-    orderId: payment.orderId.toString(),
+    orderId: payment.orderId === null ? null : payment.orderId.toString(),
     amountFen: payment.amountFen,
     orderStatus,
     succeededAt: payment.succeededAt ? payment.succeededAt.toISOString() : null,

@@ -58,8 +58,11 @@ export const WITHDRAWAL_PAID = 'paid';
 export const MIN_WITHDRAWAL_FEN = 10_000n;
 
 export const CASH_OUTFLOW = 'outflow';
+export const CASH_INFLOW = 'inflow';
 export const CASH_WECHAT_REFUND = 'wechat_refund';
 export const CASH_WITHDRAWAL_PAYOUT = 'withdrawal_payout';
+/** 联合创始人开通的微信收款。不是商品销售。 */
+export const CASH_COFOUNDER_ACTIVATION = 'cofounder_activation';
 
 export function isWalletType(value: string): value is WalletType {
   return (WALLET_TYPES as readonly string[]).includes(value);

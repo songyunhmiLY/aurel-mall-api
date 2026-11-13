@@ -14,6 +14,8 @@ import { PRODUCT_ZONE_MALL, PRODUCT_ZONE_STARTUP } from '../catalog/catalog.cons
 import { ORDER_CLOSED, ORDER_PAID, ORDER_SHIPPED } from '../orders/order.constants';
 import { PositionsService } from '../rewards/positions/positions.service';
 import {
+  CASH_COFOUNDER_ACTIVATION,
+  CASH_INFLOW,
   CASH_OUTFLOW,
   CASH_WECHAT_REFUND,
   CASH_WITHDRAWAL_PAYOUT,
@@ -179,7 +181,12 @@ export class OpsOverviewService {
 
     let wechatCashRefundedFen = 0n;
     let withdrawalPayoutFen = 0n;
+    let cofounderActivationFen = 0n;
     for (const row of cashRows) {
+      if (row.direction === CASH_INFLOW && row.bizType === CASH_COFOUNDER_ACTIVATION) {
+        cofounderActivationFen += row.amountFen;
+        continue;
+      }
       if (row.direction !== CASH_OUTFLOW) {
         continue;
       }
@@ -190,7 +197,6 @@ export class OpsOverviewService {
       }
     }
     const netCashFen = wechatCashInFen - wechatCashRefundedFen;
-    const cofounderActivationFen = 0n;
 
     let pendingWithdrawalAmountFen = 0n;
     for (const row of pendingWithdrawals) {

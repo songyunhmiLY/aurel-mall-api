@@ -37,6 +37,9 @@ describe('locked runtime config', () => {
     expect(env.locked.redPacketDailyAccrualBps).toBe(300);
     expect(env.locked.redPacketRoundPayThresholdFen).toBe(500_000);
     expect(env.locked.redPacketRoundClaimCapFen).toBe(800_000);
+    expect(env.locked.cofounderDividendRatioBps).toBe(200);
+    expect(env.locked.cofounderStartupDividendRatioBps).toBe(200);
+    expect(env.locked.cofounderMallDividendRatioBps).toBe(200);
     expect(env.locked.positionDividendPools.map((tier) => tier.positionCode)).toEqual([
       'marketing_manager',
       'senior_manager',
@@ -107,6 +110,24 @@ describe('locked runtime config', () => {
     expect(() =>
       parseAppEnv({ ...example, WECHAT_PAY_NOTIFY_URL: 'ftp://files.example.com/hook' }),
     ).toThrow(/WECHAT_PAY_NOTIFY_URL/);
+  });
+
+  it('lets the two cofounder rates override the shared fallback', () => {
+    const overridden = parseAppEnv({
+      ...example,
+      COFOUNDER_STARTUP_DIVIDEND_RATIO_BPS: '250',
+      COFOUNDER_MALL_DIVIDEND_RATIO_BPS: '150',
+    });
+    expect(overridden.locked.cofounderDividendRatioBps).toBe(200);
+    expect(overridden.locked.cofounderStartupDividendRatioBps).toBe(250);
+    expect(overridden.locked.cofounderMallDividendRatioBps).toBe(150);
+    const blank = parseAppEnv({
+      ...example,
+      COFOUNDER_STARTUP_DIVIDEND_RATIO_BPS: ' ',
+      COFOUNDER_MALL_DIVIDEND_RATIO_BPS: '',
+    });
+    expect(blank.locked.cofounderStartupDividendRatioBps).toBe(200);
+    expect(blank.locked.cofounderMallDividendRatioBps).toBe(200);
   });
 
   it('rejects duplicate position codes', () => {

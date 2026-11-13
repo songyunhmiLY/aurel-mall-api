@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { CofounderModule } from '../cofounder/cofounder.module';
 import { AwardAdminModule } from './admin/award-admin.module';
 import { NetworkAdminModule } from './admin/network-admin.module';
 import { AwardCreditModule } from './award-credit.module';
@@ -23,6 +24,7 @@ import { TreesModule } from './trees/trees.module';
     NetworkAdminModule,
     AwardAdminModule,
     RedPacketModule,
+    CofounderModule,
   ],
   providers: [RewardsService, AwardService, PaymentSettlementService],
   exports: [

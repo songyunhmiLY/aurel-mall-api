@@ -38,7 +38,15 @@ export interface LockedRuntimeConfig {
   redPacketRoundPayThresholdFen: number;
   /** 每开启一轮增加的领取上限 C。单位分。累计已领不按轮清零。官方示例 800000。 */
   redPacketRoundClaimCapFen: number;
+  /**
+   * 未单独配置创业专区或商城比例时，两条都用这个值。
+   * 官方示例是 2%。原先示例 3000 只是未结算前的占位。
+   */
   cofounderDividendRatioBps: number;
+  /** 创业专区订单应付（goods_total_fen）计提万分比。 */
+  cofounderStartupDividendRatioBps: number;
+  /** 会员商城订单 PV 计提万分比。 */
+  cofounderMallDividendRatioBps: number;
   studioDividendRatioBps: number;
   operationsTeamDividendRatioBps: number;
   /**
@@ -110,10 +118,7 @@ export function parseLockedRuntimeConfig(source: NodeJS.ProcessEnv): LockedRunti
       min: 0,
     }),
     redPacketRoundClaimCapFen: readInt(source, 'RED_PACKET_ROUND_CLAIM_CAP_FEN', { min: 0 }),
-    cofounderDividendRatioBps: readInt(source, 'COFOUNDER_DIVIDEND_RATIO_BPS', {
-      min: 0,
-      max: BPS_MAX,
-    }),
+    ...readCofounderRatios(source),
     studioDividendRatioBps: readInt(source, 'STUDIO_DIVIDEND_RATIO_BPS', { min: 0, max: BPS_MAX }),
     operationsTeamDividendRatioBps: readInt(source, 'OPERATIONS_TEAM_DIVIDEND_RATIO_BPS', {
       min: 0,
@@ -121,6 +126,38 @@ export function parseLockedRuntimeConfig(source: NodeJS.ProcessEnv): LockedRunti
     }),
     withdrawalFeeFen: readInt(source, 'WITHDRAWAL_FEE_FEN', { min: 0 }),
   });
+}
+
+function readCofounderRatios(source: NodeJS.ProcessEnv): {
+  cofounderDividendRatioBps: number;
+  cofounderStartupDividendRatioBps: number;
+  cofounderMallDividendRatioBps: number;
+} {
+  const cofounderDividendRatioBps = readInt(source, 'COFOUNDER_DIVIDEND_RATIO_BPS', {
+    min: 0,
+    max: BPS_MAX,
+  });
+  return {
+    cofounderDividendRatioBps,
+    cofounderStartupDividendRatioBps:
+      readOptionalInt(source, 'COFOUNDER_STARTUP_DIVIDEND_RATIO_BPS', { min: 0, max: BPS_MAX }) ??
+      cofounderDividendRatioBps,
+    cofounderMallDividendRatioBps:
+      readOptionalInt(source, 'COFOUNDER_MALL_DIVIDEND_RATIO_BPS', { min: 0, max: BPS_MAX }) ??
+      cofounderDividendRatioBps,
+  };
+}
+
+function readOptionalInt(
+  source: NodeJS.ProcessEnv,
+  key: string,
+  bounds: { min: number; max?: number },
+): number | undefined {
+  const raw = source[key];
+  if (raw === undefined || raw.trim() === '') {
+    return undefined;
+  }
+  return readInt(source, key, bounds);
 }
 
 function readSplit(source: NodeJS.ProcessEnv, prefix: string): WalletSplit {

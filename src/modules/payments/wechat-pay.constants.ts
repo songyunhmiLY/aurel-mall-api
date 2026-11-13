@@ -10,6 +10,13 @@ export const WECHAT_PAY_SETTING_KEYS = [
   WECHAT_PAY_API_V3_KEY_KEY,
 ] as const;
 
+export const PAYMENT_PURPOSE_ORDER = 'order';
+export const PAYMENT_PURPOSE_COFOUNDER = 'cofounder_activation';
+
 export function activePaymentSlot(orderId: bigint): string {
   return `order:${orderId.toString()}`;
+}
+
+export function activeCofounderSlot(userId: bigint): string {
+  return `cofounder:${userId.toString()}`;
 }
