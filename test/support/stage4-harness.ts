@@ -20,6 +20,8 @@ import { FilingService } from '../../src/modules/rewards/filing/filing.service';
 import { MarketPerformanceService } from '../../src/modules/rewards/market-performance.service';
 import { PaymentSettlementService } from '../../src/modules/rewards/payment-settlement.service';
 import { PositionsService } from '../../src/modules/rewards/positions/positions.service';
+import { RedPacketAdminService } from '../../src/modules/rewards/red-packet/red-packet-admin.service';
+import { RedPacketService } from '../../src/modules/rewards/red-packet/red-packet.service';
 import { TeamService } from '../../src/modules/rewards/team/team.service';
 import { TreesService } from '../../src/modules/rewards/trees/trees.service';
 import { SettingsService } from '../../src/modules/settings/settings.service';
@@ -82,7 +84,9 @@ export function buildStage4(locked: LockedRuntimeConfig = stage4Locked(), thresh
   const performance = new MarketPerformanceService(prisma);
   const positions = new PositionsService(prisma, clock, locked, settings, performance, credits);
   const team = new TeamService(prisma, clock, performance);
-  const jobs = new DueJobRunner(filing, positions);
+  const redPackets = new RedPacketService(prisma, clock, locked, credits);
+  const welfareAdmin = new RedPacketAdminService(prisma, clock, redPackets);
+  const jobs = new DueJobRunner(filing, positions, redPackets);
   const network = new NetworkAdminService(prisma, performance);
   const filingQuery = new FilingQueryService(prisma);
   const awardAdmin = new AwardAdminService(prisma);
@@ -100,6 +104,8 @@ export function buildStage4(locked: LockedRuntimeConfig = stage4Locked(), thresh
     settings,
     positions,
     team,
+    redPackets,
+    welfareAdmin,
     jobs,
     network,
     filingQuery,

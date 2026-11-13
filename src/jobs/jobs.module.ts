@@ -5,6 +5,7 @@ import { toBullMqConnection } from '../config/redis-url';
 import { APP_ENV } from '../config/tokens';
 import { FilingModule } from '../modules/rewards/filing/filing.module';
 import { PositionsModule } from '../modules/rewards/positions/positions.module';
+import { RedPacketModule } from '../modules/rewards/red-packet/red-packet.module';
 import { DueJobProcessor } from './due-job.processor';
 import { DueJobRunner } from './due-job.runner';
 import { DueJobScheduler } from './due-job.scheduler';
@@ -21,6 +22,7 @@ import { DUE_QUEUE } from './jobs.constants';
     BullModule.registerQueue({ name: DUE_QUEUE }),
     FilingModule,
     PositionsModule,
+    RedPacketModule,
   ],
   providers: [DueJobRunner, DueJobProcessor, DueJobScheduler],
 })

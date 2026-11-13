@@ -32,8 +32,11 @@ export interface LockedRuntimeConfig {
   mallPointRatioBps: number;
   mallAwardSplit: WalletSplit;
   positionDividendPools: readonly PositionPoolTier[];
+  /** 当日创业专区商品金额计提进红包池的万分比。官方示例 300 = 3%。 */
   redPacketDailyAccrualBps: number;
+  /** 累计微信支付实付每满 K 开启一轮。单位分。官方示例 500000。 */
   redPacketRoundPayThresholdFen: number;
+  /** 每开启一轮增加的领取上限 C。单位分。累计已领不按轮清零。官方示例 800000。 */
   redPacketRoundClaimCapFen: number;
   cofounderDividendRatioBps: number;
   studioDividendRatioBps: number;

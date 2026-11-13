@@ -120,6 +120,11 @@ export function nextShanghaiDate(bizDate: string): string {
   return shanghaiBizDate(new Date(start.getTime() + 24 * 60 * 60 * 1000));
 }
 
+export function previousShanghaiDate(bizDate: string): string {
+  const start = shanghaiAt(bizDate, 0, 0);
+  return shanghaiBizDate(new Date(start.getTime() - 24 * 60 * 60 * 1000));
+}
+
 /** 含当天在内、向前共 days 个上海自然日的起点。days = 7 时是今天和前 6 天。 */
 export function startOfRecentShanghaiDays(instant: Date, days: number): Date {
   const start = startOfShanghaiDay(instant);

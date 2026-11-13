@@ -367,6 +367,9 @@ export class Stage1Db {
   readonly positionDividendPeriod = new MemoryTable([['performanceMonth']]);
   readonly positionDividendExclusion = new MemoryTable([['periodId', 'userId']]);
   readonly positionDividendRecord = new MemoryTable([['periodId', 'userId', 'positionCode']]);
+  readonly redPacketDailyAccrual = new MemoryTable([['bizDate']]);
+  readonly redPacketSignup = new MemoryTable([['userId', 'bizDate']]);
+  readonly redPacketPayout = new MemoryTable([['userId', 'bizDate']]);
 
   async $queryRaw(
     strings: TemplateStringsArray,
@@ -512,6 +515,9 @@ export class Stage1Db {
       this.positionDividendPeriod,
       this.positionDividendExclusion,
       this.positionDividendRecord,
+      this.redPacketDailyAccrual,
+      this.redPacketSignup,
+      this.redPacketPayout,
     ];
   }
 }
