@@ -379,6 +379,9 @@ export class Stage1Db {
   readonly cofounderScheduleSlot = new MemoryTable([['slotKey']]);
   readonly studioEnrollment = new MemoryTable([]);
   readonly studioAccrual = new MemoryTable([['orderId', 'userId']]);
+  readonly opsTeamSeat = new MemoryTable([['slot']]);
+  readonly opsTeamEnrollment = new MemoryTable([['activeSlot']]);
+  readonly opsTeamAccrual = new MemoryTable([['orderId']]);
 
   async $queryRaw(
     strings: TemplateStringsArray,
@@ -538,6 +541,9 @@ export class Stage1Db {
       this.cofounderScheduleSlot,
       this.studioEnrollment,
       this.studioAccrual,
+      this.opsTeamSeat,
+      this.opsTeamEnrollment,
+      this.opsTeamAccrual,
     ];
   }
 }

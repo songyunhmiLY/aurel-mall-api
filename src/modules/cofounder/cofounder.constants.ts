@@ -71,7 +71,8 @@ export const BUTTON_OPEN = 'open';
 
 /**
  * 取消审核页按奖励类型列出的累计入账。顺序固定。
- * 商城销售奖、商城见点奖是已经入账的类型。工作室和运营团队尚未结算，没有流水时为 0。
+ * 商城销售奖、商城见点奖、工作室补贴和运营团队分红按 rewardType 合计。
+ * 运营团队的创业专区和商城在钱包里分成两笔，这里仍合成一行。
  */
 export const COFOUNDER_AWARD_LINES = [
   { rewardType: 'startup_sales', label: '报单销售奖' },

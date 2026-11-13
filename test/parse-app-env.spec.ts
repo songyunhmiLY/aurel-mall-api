@@ -42,6 +42,10 @@ describe('locked runtime config', () => {
     expect(env.locked.cofounderMallDividendRatioBps).toBe(200);
     expect(env.locked.studioStartupSubsidyRatioBps).toBe(200);
     expect(env.locked.studioMallSubsidyRatioBps).toBe(200);
+    expect(env.locked.opsTeamStartupDividendRatioBps).toBe(500);
+    expect(env.locked.opsTeamMallDividendRatioBps).toBe(700);
+    expect(env.locked).not.toHaveProperty('operationsTeamDividendRatioBps');
+    expect(env.locked).not.toHaveProperty('opsTeamDividendRatioBps');
     expect(env.locked.positionDividendPools.map((tier) => tier.positionCode)).toEqual([
       'marketing_manager',
       'senior_manager',
@@ -130,6 +134,25 @@ describe('locked runtime config', () => {
     });
     expect(blank.locked.cofounderStartupDividendRatioBps).toBe(200);
     expect(blank.locked.cofounderMallDividendRatioBps).toBe(200);
+  });
+
+  it('keeps the two ops-team dividend rates independent of the old placeholder', () => {
+    const overridden = parseAppEnv({
+      ...example,
+      OPS_TEAM_STARTUP_DIVIDEND_RATIO_BPS: '500',
+      OPS_TEAM_MALL_DIVIDEND_RATIO_BPS: '700',
+      OPS_TEAM_DIVIDEND_RATIO_BPS: '1000',
+      OPERATIONS_TEAM_DIVIDEND_RATIO_BPS: '1000',
+    });
+    expect(overridden.locked.opsTeamStartupDividendRatioBps).toBe(500);
+    expect(overridden.locked.opsTeamMallDividendRatioBps).toBe(700);
+    expect(overridden.locked).not.toHaveProperty('operationsTeamDividendRatioBps');
+    const staleOnly = { ...example };
+    delete staleOnly.OPS_TEAM_STARTUP_DIVIDEND_RATIO_BPS;
+    delete staleOnly.OPS_TEAM_MALL_DIVIDEND_RATIO_BPS;
+    staleOnly.OPS_TEAM_DIVIDEND_RATIO_BPS = '1000';
+    staleOnly.OPERATIONS_TEAM_DIVIDEND_RATIO_BPS = '1000';
+    expect(() => parseAppEnv(staleOnly)).toThrow(/OPS_TEAM_STARTUP_DIVIDEND_RATIO_BPS/);
   });
 
   it('keeps the two studio subsidy rates independent', () => {

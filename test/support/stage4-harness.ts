@@ -9,6 +9,8 @@ import { CofounderPayService } from '../../src/modules/cofounder/cofounder-pay.s
 import { CofounderPoolService } from '../../src/modules/cofounder/cofounder-pool.service';
 import { CofounderReviewService } from '../../src/modules/cofounder/cofounder-review.service';
 import { CofounderSettingsService } from '../../src/modules/cofounder/cofounder-settings.service';
+import { OpsTeamDividendService } from '../../src/modules/ops-team/ops-team-dividend.service';
+import { OpsTeamEnrollmentService } from '../../src/modules/ops-team/ops-team-enrollment.service';
 import { StudioEnrollmentService } from '../../src/modules/studio/studio-enrollment.service';
 import { StudioSettingsService } from '../../src/modules/studio/studio-settings.service';
 import { StudioSubsidyService } from '../../src/modules/studio/studio-subsidy.service';
@@ -77,7 +79,15 @@ export function buildStage4(locked: LockedRuntimeConfig = stage4Locked(), thresh
     cofounderSettings,
   );
   const studioSubsidy = new StudioSubsidyService(locked, credits);
-  const paid = new PaymentSettlementService(filing, awards, cofounderDividend, studioSubsidy);
+  const opsTeamEnrollment = new OpsTeamEnrollmentService(prisma, clock);
+  const opsTeamDividend = new OpsTeamDividendService(locked, credits, opsTeamEnrollment);
+  const paid = new PaymentSettlementService(
+    filing,
+    awards,
+    cofounderDividend,
+    studioSubsidy,
+    opsTeamDividend,
+  );
   const hook = new PaymentSettlementHook(paid);
   const settlement = new OrderPaymentSettler(wallet, trees, hook);
   const paySettings: {
@@ -178,6 +188,8 @@ export function buildStage4(locked: LockedRuntimeConfig = stage4Locked(), thresh
     studioSubsidy,
     studioSettings,
     studioEnrollment,
+    opsTeamEnrollment,
+    opsTeamDividend,
     displayNames,
     cash,
   };

@@ -106,7 +106,8 @@ export function lockedConfig(startupZoneUnitPriceFen: number): LockedRuntimeConf
     cofounderMallDividendRatioBps: 0,
     studioStartupSubsidyRatioBps: 0,
     studioMallSubsidyRatioBps: 0,
-    operationsTeamDividendRatioBps: 0,
+    opsTeamStartupDividendRatioBps: 0,
+    opsTeamMallDividendRatioBps: 0,
     withdrawalFeeFen: 0,
   });
 }
