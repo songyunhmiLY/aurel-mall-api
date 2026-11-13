@@ -1,6 +1,6 @@
 # 奥瑞尔经销商城 API
 
-经销商城后端。当前包含工程骨架、业务时钟、管理员登录、小程序登录、实名、收货地址、商品上下架、订单支付、三个钱包账户、消费账户划转、提现审核、商城退款审核、创业专区支付成功后的入座、报单与全网公排、创业专区和商城奖励、月度职位分红、创业团队页，以及微信支付下单与回调。购物车、福利专场、联合创始人、工作室、运营团队和消息推送还没做。
+经销商城后端。当前包含工程骨架、业务时钟、管理员登录、小程序登录、实名、收货地址、商品上下架、订单支付、三个钱包账户、消费账户划转、提现审核、商城退款审核、创业专区支付成功后的入座、报单与全网公排、创业专区和商城奖励、月度职位分红、创业团队页、管理端运营总览，以及微信支付下单与回调。购物车、福利专场、联合创始人、工作室、运营团队和消息推送还没做。
 
 同级仓库：
 
@@ -106,6 +106,7 @@ src/
     wallet/               # 积分、可提现、消费账户、划转、提现
     cms/                  # Banner / 文章 / 滚动条占位
     rewards/              # 报单、奖励、市场业绩、职位分红、创业团队
+    ops/                  # 管理端运营总览（只读）
     settings/             # 营销经理门槛 T（下月生效）
   jobs/                   # 按业务时钟跑每日报单检查和职位分红
 prisma/schema/            # 多文件 schema，无外键
@@ -121,7 +122,7 @@ docs/er.md                # 逻辑 ER 图
 - 失败：HTTP 状态与 `code` 相同，`message` 为原因，`data` 一般为 `null`
 - 健康检查：`GET /api/v1/health`
 
-对外业务路由包括健康检查、时钟、管理员登录、小程序登录、实名、收货地址、商品、钱包余额和流水、消费账户划转、提现、商城退款、订单支付、发货、微信支付、创业团队，以及管理端的邀请关系、市场树、报单、奖励、职位分红和会员钱包查询。购物车、福利专场和联合创始人分红还没有接口。会员端没有幸运返还、奖励明细、我的职位或邀请关系列表，这些金额出现在可提现分类里，关系和管理明细只给管理端。JSON 里的 bigint 编号和金额里的 bigint 都是十进制字符串。
+对外业务路由包括健康检查、时钟、管理员登录、小程序登录、实名、收货地址、商品、钱包余额和流水、消费账户划转、提现、商城退款、订单支付、发货、微信支付、创业团队，以及管理端的邀请关系、市场树、报单、奖励、职位分红、会员钱包查询和运营总览。购物车、福利专场和联合创始人分红还没有接口。会员端没有幸运返还、奖励明细、我的职位或邀请关系列表，这些金额出现在可提现分类里，关系和管理明细只给管理端。会员端也不提供运营总览，不能靠这个接口轮询资金。JSON 里的 bigint 编号和金额里的 bigint 都是十进制字符串。
 
 ## 认证
 
@@ -135,6 +136,67 @@ docs/er.md                # 逻辑 ER 图
 - 管理端路由带 `Authorization: Bearer <token>`。守卫会再查库，确认账户仍然是 `active`。
 
 初始管理员不要把密码写进仓库。在 `.env` 里同时填写 `ADMIN_BOOTSTRAP_USERNAME` 和 `ADMIN_BOOTSTRAP_PASSWORD`（8 到 128 位）后启动：若该用户名还不存在，就创建一次。已存在则跳过，不会改密码。两个变量都留空则不创建。要再加一名管理员，把这两个变量改成新账户后重启，旧账户保留。`ADMIN_BOOTSTRAP_DISPLAY_NAME` 可空，空则显示名等于用户名。
+
+## 运营总览
+
+管理端第一屏。只读，可以重复调用。30 秒刷新由客户端自己请求，服务端不推送。对齐官方需求 §18.3，不改现金流水的写入规则，也不改报单、退款和提现的互斥。不返回成本或利润，也不返回职位分红金额。
+
+需要管理员令牌：
+
+- `GET /api/v1/admin/ops/overview`
+- 查询参数 `period`：`today`（默认）、`yesterday`、`last7days`、`month`、`custom`
+- `custom` 必须同时给 `from` 和 `to`。`YYYY-MM-DD` 按 Asia/Shanghai 自然日，含首尾两天。带时区的 ISO 时刻按 `[from, to)`，右端不含。不能超过 370 个自然日。没有时区的时刻返回 400。
+
+`data.period` 有 `key`、`timezone`（固定 `Asia/Shanghai`）、`from`、`until`（ISO，`until` 不含）、`fromBizDate`、`untilBizDate`。`today`、`yesterday`、`last7days` 都含业务时钟的当天。`last7days` 是含当天在内的 7 个自然日。`month` 是时钟所在的整个自然月，从 1 日 00:00 到下月 1 日 00:00。
+
+金额合计是 bigint，JSON 里是十进制字符串。笔数、件数、序号、`delta` 是 number。编号是十进制字符串。时间是 ISO 字符串。订单上的单笔 `*Fen` 在订单接口里仍是 number；这里的应付和现金都是多笔合计，所以用字符串。
+
+`data.kpis`：
+
+- `registeredUsers`：当前注册用户数，含尚未入座的人。number。
+- `members`：当前已入座会员数（`seated`）。number。
+- `newRegistrations`、`newMembers`：`count` 是本区间的新增注册、新增入座。`previousDay` 是区间起点所在上海日的前一个自然日，`previousDayCount` 是那一整天的人数，`delta` 是 `count - previousDayCount`。多日区间仍然只和这一个自然日比较。
+- `wechatCash`：`cashInFen` 是已支付订单的微信渠道金额，`cashRefundedFen` 是现金流水里的微信实退，`netFen` 是两者之差。积分、可提现、消费账户的抵扣算进应付，不算进微信实收。
+- `pendingWithdrawals`：当前待审核提现的 `count` 和 `amountFen`。不按区间截断。
+
+`data.trend` 是区间里每个上海自然日一条：`bizDate`、`startupPayableFen`、`mallPayableFen`。只统计状态为 `paid` 或 `shipped`、且 `paidAt` 落在区间内的订单。应付是订单 `payAmountFen`（商品金额加该单运费）。没有订单的日期金额为 `"0"`。
+
+`data.composition.startup` 和 `data.composition.mall`：
+
+- `orderCount`、`itemQuantity`、`payableFen`：同上，已支付订单。商城应付含运费，创业专区若该单收了运费也同样含在 `payAmountFen` 里。
+- `pendingShipmentCount`：区间内 `paidAt`、状态仍是 `paid` 的订单数。
+- `shippedCount`：区间内 `shippedAt`、状态为 `shipped` 的订单数。
+- `closedCount`：区间内 `closedAt`、状态为 `closed` 的订单数。关闭未支付的订单只出现在这里，不进入应付和微信实收。
+
+`data.composition.cash`：
+
+- `wechatCashInFen`、`wechatCashRefundedFen`、`netCashFen`：与顶部微信现金相同。净额可以是负数，表示本区间的实退多于实收。
+- `withdrawalPayoutFen`：现金流水里 `withdrawal_payout` 的实付合计，不从净额里扣。
+- `cofounderActivationFen`：联合创始人开通里实际走微信的收款。当前没有这笔支付记录，固定 `"0"`，不并进商品实收，也不把可提现账户里的 `cofounder` 入账当成现金。
+
+`data.withdrawals`：
+
+- `pendingReview`：与顶部待审核提现相同。
+- `completedPayouts`：`count` 和 `amountFen` 来自本区间已打款结算（`amountFen` 是申请金额）。`payoutFen` 与现金流水里的提现实付相同。
+- `pendingRefunds.count`：当前待审核商城退款笔数。申请时还没有审定退款额。
+- `mutualExclusion`：有待审核提现的会员不能同时申请商城退款，有待审核退款的会员不能同时提现。`withdrawalBlocksRefundUserCount` 和 `refundBlocksWithdrawalUserCount` 是这两边的会员数。`bothPendingUserCount` 是同一个人两边都待审核的人数，按现有互斥应为 `0`。
+
+`data.wallets` 是会员负债，不是现金账。`withdrawable`、`points`、`consumption` 各有 `availableFen`（余额减冻结）和 `frozenFen`。`withdrawalAppliedUnpaidFen` 是已申请、尚未打款的提现金额，单独列出，不从冻结里再减一次。
+
+`data.filing` 不随 `period` 改变，展示业务时钟的当天和当前公排：
+
+- `todayFiledCount`、`todayBizDate`：当天已完成的报单笔数。每个会员每个自然日最多一笔。
+- `currentSequence`：全网公排当前序号。还没有报单时为 `0`。number。
+- `nextLuckyReturnSequence`：下一个会触发幸运返还的序号，即严格晚于当前序号的下一个 5 的倍数。当前为 `0` 或 `5` 时，下一个分别是 `5` 和 `10`。
+- `nextLuckyReturnBeneficiarySequence`：那个序号要结算的公排序号 k。序号 5 结算序号 1。
+- `latestLuckyReturn`：最近一笔幸运返还。没有时为 `null`。字段有 `id`、`triggerSequence`、`beneficiarySequence`、`beneficiaryFilingId`、`beneficiaryUserId`、`pointsFen`、`withdrawableFen`、`settledAt`。编号和金额是字符串。
+- `backlogCount`：尚未报出的创业子单数，留给每日自动报单检查。检查时刻是锁定配置 `dailyCheckTime`，默认 `00:01`，本接口不修改它。
+
+`data.organization`：
+
+- `seatedMembers`、`nonMembers`：已入座和未入座，两者之和等于注册用户数。
+- `membersWithThreeMarkets`：直接下级市场已经有 3 个的会员数。
+- `positionQualifications`：职位模块已存在，所以 `available` 为 `true`。`performanceMonth` 是当前上海自然月，`thresholdFen` 是这个月已经生效的门槛 T。改 T 只从下月生效，这里不用下月的 T。`counts` 里每一档有 `positionCode`、`positionName`、`qualifiedCount`。显示名沿用营销经理、高级经理、营销总监、高级总监、首席。人数是达到该档资格的会员数，不按分红池剔除更高职位，也不给分红金额。
 
 ## 小程序登录
 
