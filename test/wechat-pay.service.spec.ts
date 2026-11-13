@@ -3,6 +3,7 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  InternalServerErrorException,
   NotFoundException,
 } from '@nestjs/common';
 import { generateKeyPairSync } from 'node:crypto';
@@ -10,6 +11,7 @@ import type { ClockService } from '../src/common/clock/clock.service';
 import type { PrismaService } from '../src/common/prisma/prisma.service';
 import type { AppEnv } from '../src/config/app-env';
 import type { WechatPayGateway } from '../src/modules/payments/wechat-pay.gateway';
+import type { OrderPaymentSettler } from '../src/modules/orders/order-payment.settler';
 import { WechatPayService } from '../src/modules/payments/wechat-pay.service';
 import type {
   WechatPayCredentials,
@@ -201,6 +203,7 @@ describe('wechat pay orders', () => {
       settings as unknown as WechatPaySettingsService,
       gateway as unknown as WechatPayGateway,
       env as AppEnv,
+      payingSettler(db),
     );
     return { db, settings, gateway, env, service };
   }
@@ -381,4 +384,50 @@ describe('wechat pay orders', () => {
     await expect(service.createPrepay({ orderId: '7' })).rejects.toBeInstanceOf(ConflictException);
     await expect(service.simulateSuccess('missing')).rejects.toBeInstanceOf(NotFoundException);
   });
+
+  it('does not mark the order paid when settlement is not wired', async () => {
+    const db = memoryDb();
+    seedOrder(db);
+    const settings = {
+      async readCredentials() {
+        return null;
+      },
+      async isConfigured() {
+        return false;
+      },
+    };
+    const gateway = {
+      createJsapiTransaction: jest.fn(),
+      verifyAndDecrypt: jest.fn(),
+    };
+    const service = new WechatPayService(
+      db as unknown as PrismaService,
+      clock as unknown as ClockService,
+      settings as unknown as WechatPaySettingsService,
+      gateway as unknown as WechatPayGateway,
+      { wechatPayNotifyUrl: null } as AppEnv,
+    );
+    const created = await service.createPrepay({ orderId: '7' });
+    await expect(service.simulateSuccess(created.payNo)).rejects.toBeInstanceOf(
+      InternalServerErrorException,
+    );
+    expect(db.orders.get(7n)?.status).toBe('pending_payment');
+    expect(db.orders.get(7n)?.paidAt).toBeNull();
+    expect([...db.payments.values()][0]?.status).toBe('pending');
+  });
 });
+
+function payingSettler(db: MemoryDb): OrderPaymentSettler {
+  return {
+    async settleWechatSuccess(_tx: unknown, orderId: bigint, paidAt: Date): Promise<string> {
+      await db.order.update({
+        where: { id: orderId },
+        data: { status: 'paid', paidAt, updatedAt: paidAt },
+      });
+      return 'paid';
+    },
+    async releaseWechatFailure(): Promise<void> {
+      return undefined;
+    },
+  } as unknown as OrderPaymentSettler;
+}

@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable, InternalServerErrorException } from '@nestjs/common';
+import { randomBytes } from 'node:crypto';
 import type { MarketTreeNode, Prisma } from '@prisma/client';
 
 const CHILD_SLOTS = 3;
@@ -7,8 +8,8 @@ const MAX_PATH_LENGTH = 2048;
 type Tx = Prisma.TransactionClient;
 
 /**
- * 创业专区支付成功后，从邀请人的席位往下找一个空位。
- * 注册只写邀请树。这里不处理报单和奖励。
+ * 创业专区支付成功后，从已有邀请上级往下找一个空位。
+ * 不改邀请上级，也不处理报单和奖励。
  * 对外错误文案不使用“市场树”或“节点”。
  */
 @Injectable()
@@ -56,9 +57,14 @@ export class TreesService {
   }
 
   private async markSeated(tx: Tx, userId: bigint, now: Date): Promise<void> {
+    const user = await tx.user.findUnique({ where: { id: userId } });
+    if (!user) {
+      throw new InternalServerErrorException('入座失败');
+    }
+    const inviteCode = user.inviteCode ?? (await allocateInviteCode(tx));
     await tx.user.update({
       where: { id: userId },
-      data: { member: true, seated: true, updatedAt: now },
+      data: { member: true, seated: true, inviteCode, updatedAt: now },
     });
   }
 
@@ -139,6 +145,28 @@ export class TreesService {
       current = node.parentUserId;
     }
   }
+}
+
+const INVITE_CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+
+async function allocateInviteCode(tx: Tx): Promise<string> {
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const inviteCode = randomInviteCode();
+    const taken = await tx.user.findFirst({ where: { inviteCode } });
+    if (!taken) {
+      return inviteCode;
+    }
+  }
+  throw new InternalServerErrorException('入座失败');
+}
+
+function randomInviteCode(): string {
+  const bytes = randomBytes(8);
+  let code = '';
+  for (const byte of bytes) {
+    code += INVITE_CODE_ALPHABET[byte % INVITE_CODE_ALPHABET.length] ?? 'A';
+  }
+  return code;
 }
 
 function groupChildren(parents: MarketTreeNode[], rows: MarketTreeNode[]): MarketTreeNode[][] {

@@ -7,7 +7,7 @@ model User {
   avatarUrl String?  @map("avatar_url") @db.VarChar(512)
   /// 微信手机号快速验证绑定的号码。不是登录唯一键，不用于合并账号，允许重复。
   phone      String?  @db.VarChar(32)
-  /// 本阶段只有系统根账户会写入邀请码。
+  /// 非会员为空。第一次入座时写入唯一邀请码。根账户是 ROOT。
   inviteCode String?  @unique(map: "users_invite_code_uq") @map("invite_code") @db.VarChar(32)
   /// 有市场席位即为会员。与 seated 在同一次写入里维护，避免每次判断都查席位表。
   member    Boolean

@@ -164,7 +164,13 @@ export async function loginBuyer(
   stage.wechat.logins.set(subject, { openid: `openid-${subject}`, unionid: null });
   const session = await stage.users.loginWithMiniProgram(subject);
   if (inviterUserId !== null) {
-    attachInvite(stage.db, session.user.id, inviterUserId, stage.clock.current);
+    const inviter = stage.db.user.rows.find((row) => row.id === inviterUserId);
+    const code = inviter?.inviteCode;
+    if (typeof code === 'string' && code.length > 0) {
+      await stage.users.bindInviter(session.user.id, code);
+    } else {
+      attachInvite(stage.db, session.user.id, inviterUserId, stage.clock.current);
+    }
   }
   return session.user.id;
 }

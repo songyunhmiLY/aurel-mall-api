@@ -1,5 +1,5 @@
 /// 邀请树。parentUserId 为空表示根。
-/// 注册只写这棵树。市场席位要等创业专区支付成功后另写。
+/// 填写邀请码时写入上级。市场席位要等创业专区支付成功后另写，且不会改这里的上级。
 model InviteTreeNode {
   id           BigInt   @id @default(autoincrement())
   userId       BigInt   @unique(map: "invite_tree_user_id_uq") @map("user_id")

@@ -1,5 +1,12 @@
-import { ConflictException, ForbiddenException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  ValidationPipe,
+} from '@nestjs/common';
+import { validate } from 'class-validator';
 import { PRODUCT_ZONE_MALL, PRODUCT_ZONE_STARTUP } from '../src/modules/catalog/catalog.constants';
+import { CreateOrderDto } from '../src/modules/orders/dto/create-order.dto';
 import {
   addressOf,
   boot,
@@ -330,6 +337,13 @@ describe('orders and forced payment', () => {
     expect(stockOf(stage.db, cup.skuId)).toBe(3);
     expect(stage.hook.events.at(-1)?.pvFen).toBe(350);
     expect(stage.db.marketTreeNode.rows.filter((row) => row.userId === buyer)).toHaveLength(1);
+    const shipped = await stage.orders.ship(mall.id, {
+      courierName: '中通',
+      trackingNumber: 'ZT100',
+    });
+    expect(shipped.status).toBe('shipped');
+    expect(shipped.zone).toBe(PRODUCT_ZONE_MALL);
+    expect(shipped.trackingNumber).toBe('ZT100');
   });
 
   it('holds mall balances until WeChat succeeds and restores them on failure', async () => {
@@ -431,4 +445,53 @@ describe('orders and forced payment', () => {
       stage.orders.ship(created.id, { courierName: '顺丰', trackingNumber: 'SF1' }),
     ).rejects.toThrow('只有已支付的订单可以发货');
   });
+
+  it('rejects a missing address and an address that belongs to someone else', async () => {
+    const stage = buildStage2();
+    const rootId = await boot(stage);
+    const buyer = await loginBuyer(stage, 'addr-buyer', rootId);
+    const other = await loginBuyer(stage, 'addr-other', rootId);
+    const foreignAddressId = await addressOf(stage, other);
+    const product = await startupProduct(stage, '创业装', 2);
+    const missing = plainToDto({
+      zone: PRODUCT_ZONE_STARTUP,
+      items: [{ productId: product.id.toString(), quantity: 1 }],
+    });
+    const errors = await validate(missing);
+    expect(errors.map((error) => error.property)).toContain('addressId');
+
+    const pipe = new ValidationPipe({
+      whitelist: true,
+      forbidNonWhitelisted: true,
+      transform: true,
+    });
+    await expect(
+      pipe.transform(
+        { zone: PRODUCT_ZONE_STARTUP, items: [{ productId: '1', quantity: 1 }] },
+        { type: 'body', metatype: CreateOrderDto },
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    try {
+      await pipe.transform(
+        { zone: PRODUCT_ZONE_STARTUP, items: [{ productId: '1', quantity: 1 }] },
+        { type: 'body', metatype: CreateOrderDto },
+      );
+    } catch (error) {
+      expect(error).toBeInstanceOf(BadRequestException);
+      expect(JSON.stringify((error as BadRequestException).getResponse())).toContain('地址不正确');
+    }
+
+    await expect(
+      stage.orders.create(buyer, {
+        zone: PRODUCT_ZONE_STARTUP,
+        addressId: foreignAddressId,
+        items: [{ productId: product.id, quantity: 1 }],
+      }),
+    ).rejects.toThrow('地址不存在');
+    expect(stage.db.order.rows.filter((row) => row.userId === buyer)).toHaveLength(0);
+  });
 });
+
+function plainToDto(value: object): CreateOrderDto {
+  return Object.assign(new CreateOrderDto(), value);
+}

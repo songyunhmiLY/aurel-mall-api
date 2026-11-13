@@ -22,7 +22,7 @@ export const RESERVED_LOGIN_PROVIDERS = [
   IDENTITY_PROVIDERS.smsPhone,
 ] as const;
 
-/** 官方根账户的预置邀请码。本阶段不给其他用户发邀请码。 */
+/** 官方根账户的预置邀请码。其他会员在第一次入座时另行得到邀请码。 */
 export const ROOT_INVITE_CODE = 'ROOT';
 
 export const ROOT_IDENTITY_IDENTIFIER = 'root';

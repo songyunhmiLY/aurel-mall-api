@@ -22,7 +22,7 @@
 
 `admin_settings` 只放管理员可改的配置（营销经理市场门槛 T，以及微信支付商户号、API 证书、APIv3 密钥）。锁定配置不进这张表。证书放在 `TEXT` 字段里。
 
-`users.phone` 是微信手机号组件绑定的号码，可空、不唯一。`users.invite_code` 本阶段只有根账户会写，值为 `ROOT`。`users.member` 和 `users.seated` 表示已经有市场席位，入座时一起写成 true。`user_kyc` 保存姓名、身份证号和手机号；格式通过后 `status = verified`。
+`users.phone` 是微信手机号组件绑定的号码，可空、不唯一。`users.invite_code` 根账户是 `ROOT`。其他用户在第一次入座前为空，入座时写入唯一邀请码。`users.member` 和 `users.seated` 表示已经有市场席位，入座时一起写成 true。`user_kyc` 保存姓名、身份证号和手机号；格式通过后 `status = verified`。
 
 ```mermaid
 erDiagram

@@ -5,6 +5,7 @@ import {
   forwardRef,
   Inject,
   Injectable,
+  InternalServerErrorException,
   NotFoundException,
   Optional,
 } from '@nestjs/common';
@@ -325,6 +326,10 @@ export class WechatPayService {
       ) {
         throw new ConflictException('订单不在待支付状态');
       }
+      const settler = this.settler;
+      if (becameSuccess && order.status === ORDER_PENDING_PAYMENT && !settler) {
+        throw new InternalServerErrorException('订单结算未就绪');
+      }
       await tx.payment.update({
         where: { id: payment.id },
         data: {
@@ -336,18 +341,10 @@ export class WechatPayService {
         },
       });
       let orderStatus = order.status;
-      if (becameSuccess && order.status === ORDER_PENDING_PAYMENT) {
-        if (this.settler) {
-          orderStatus = await this.settler.settleWechatSuccess(tx, order.id, now);
-        } else {
-          await tx.order.update({
-            where: { id: order.id },
-            data: { status: ORDER_PAID, paidAt: now, updatedAt: now },
-          });
-          orderStatus = ORDER_PAID;
-        }
-      } else if (becameFailed && this.settler) {
-        await this.settler.releaseWechatFailure(tx, order.id, now);
+      if (becameSuccess && order.status === ORDER_PENDING_PAYMENT && settler) {
+        orderStatus = await settler.settleWechatSuccess(tx, order.id, now);
+      } else if (becameFailed && settler) {
+        await settler.releaseWechatFailure(tx, order.id, now);
       }
       return toPaymentResult(
         {
