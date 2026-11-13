@@ -7,6 +7,7 @@ import { JobsModule } from './jobs/jobs.module';
 import { CatalogModule } from './modules/catalog/catalog.module';
 import { CofounderPayModule } from './modules/cofounder/cofounder-pay.module';
 import { CofounderModule } from './modules/cofounder/cofounder.module';
+import { StudioModule } from './modules/studio/studio.module';
 import { CmsModule } from './modules/cms/cms.module';
 import { HealthModule } from './modules/health/health.module';
 import { AdminModule } from './modules/admin/admin.module';
@@ -38,6 +39,7 @@ import { WalletModule } from './modules/wallet/wallet.module';
     SettingsModule,
     CofounderModule,
     CofounderPayModule,
+    StudioModule,
   ],
 })
 export class AppModule {}
