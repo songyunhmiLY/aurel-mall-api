@@ -1,0 +1,51 @@
+/// 全网只有一行，slot 固定为 1。当前没有运营团队时 enrollment_id 为空。
+/// 指定、改派、取消和支付成功计提都先锁这一行。
+model OpsTeamSeat {
+  id           BigInt   @id @default(autoincrement())
+  slot         Int      @unique(map: "ops_team_seats_slot_uq")
+  enrollmentId BigInt?  @map("enrollment_id")
+  updatedAt    DateTime @map("updated_at") @db.DateTime(3)
+
+  @@map("ops_team_seats")
+}
+
+/// 运营团队（运营负责人）身份。全网同时最多一条 active。
+/// 只有管理员指定。没有支付开通。改派或取消后另写一行，上一任立刻停止。
+/// status: active / cancelled。取消不退款，也不动钱包。
+/// active_slot 在籍时为 1，取消后为空。唯一索引保证同时只有一名持有人。
+model OpsTeamEnrollment {
+  id                 BigInt    @id @default(autoincrement())
+  userId             BigInt    @map("user_id")
+  status             String    @db.VarChar(32)
+  appointedByAdminId BigInt    @map("appointed_by_admin_id")
+  enrolledAt         DateTime  @map("enrolled_at") @db.DateTime(3)
+  cancelledAt        DateTime? @map("cancelled_at") @db.DateTime(3)
+  cancelledByAdminId BigInt?   @map("cancelled_by_admin_id")
+  /// 在籍时为 1，取消后为 NULL。MySQL 唯一索引允许多个 NULL。
+  activeSlot         Int?      @unique(map: "ops_team_enrollments_active_slot_uq") @map("active_slot")
+  createdAt          DateTime  @map("created_at") @db.DateTime(3)
+  updatedAt          DateTime  @map("updated_at") @db.DateTime(3)
+
+  @@index([userId, status], map: "ops_team_enrollments_user_status_idx")
+  @@index([status, enrolledAt], map: "ops_team_enrollments_status_enrolled_idx")
+  @@map("ops_team_enrollments")
+}
+
+/// 一笔已支付订单对当时的那一名运营团队计提一次。金额为 0 的不写。没人在籍时不写。
+/// 不按市场树或邀请树，也不在多人之间拆分。
+/// baseField: goods_total_fen 创业专区应付 / pv_fen 商城 PV。
+model OpsTeamAccrual {
+  id         BigInt   @id @default(autoincrement())
+  orderId    BigInt   @unique(map: "ops_team_accruals_order_id_uq") @map("order_id")
+  userId     BigInt   @map("user_id")
+  zone       String   @db.VarChar(32)
+  baseField  String   @map("base_field") @db.VarChar(32)
+  baseFen    BigInt   @map("base_fen")
+  ratioBps   Int      @map("ratio_bps")
+  amountFen  BigInt   @map("amount_fen")
+  occurredAt DateTime @map("occurred_at") @db.DateTime(3)
+  createdAt  DateTime @map("created_at") @db.DateTime(3)
+
+  @@index([userId, occurredAt], map: "ops_team_accruals_user_occurred_idx")
+  @@map("ops_team_accruals")
+}

@@ -41,6 +41,7 @@ export type WithdrawalDisplaySourceCode = (typeof WITHDRAWAL_DISPLAY_SOURCES)[nu
 export const WITHDRAWAL_DISPLAY_DEFAULTS: Record<WithdrawalDisplaySourceCode, string> = {
   cofounder: '系统奖励',
   studio: '系统激励',
+  /** 运营团队分红。创业专区和商城是两笔流水，bizType 分别为 operations_startup、operations_mall。 */
   operations: '平台分红',
   red_packet: '系统红包',
   startup_sales: '销售激励',

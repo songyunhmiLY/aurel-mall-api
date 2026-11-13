@@ -57,7 +57,17 @@ export interface LockedRuntimeConfig {
    * 官方示例 200 = 2%。与创业专区那条分开配置，都不是管理端可改项。
    */
   studioMallSubsidyRatioBps: number;
-  operationsTeamDividendRatioBps: number;
+  /**
+   * 运营团队创业专区分红。全网已支付创业专区订单的 goods_total_fen。
+   * 官方示例 500 = 5%。只发给当时那一名持有人。不是管理端可改项。
+   * 原先的 OPERATIONS_TEAM_DIVIDEND_RATIO_BPS 和 OPS_TEAM_DIVIDEND_RATIO_BPS 是未结算占位，不再读取。
+   */
+  opsTeamStartupDividendRatioBps: number;
+  /**
+   * 运营团队商城分红。全网已支付商城订单的 pv_fen。
+   * 官方示例 700 = 7%。与创业专区那条分开配置，都不是管理端可改项。
+   */
+  opsTeamMallDividendRatioBps: number;
   /**
    * 提现手续费，单位分。打款时从申请金额里减去当时的这个值。
    * TODO: 需求 §1.1 的仓库清单里没有这项。任务要求手续费来自锁定配置，
@@ -87,7 +97,8 @@ export const LOCKED_RUNTIME_ENV_KEYS = [
   'COFOUNDER_DIVIDEND_RATIO_BPS',
   'STUDIO_STARTUP_SUBSIDY_RATIO_BPS',
   'STUDIO_MALL_SUBSIDY_RATIO_BPS',
-  'OPERATIONS_TEAM_DIVIDEND_RATIO_BPS',
+  'OPS_TEAM_STARTUP_DIVIDEND_RATIO_BPS',
+  'OPS_TEAM_MALL_DIVIDEND_RATIO_BPS',
   'WITHDRAWAL_FEE_FEN',
 ] as const;
 
@@ -137,7 +148,11 @@ export function parseLockedRuntimeConfig(source: NodeJS.ProcessEnv): LockedRunti
       min: 0,
       max: BPS_MAX,
     }),
-    operationsTeamDividendRatioBps: readInt(source, 'OPERATIONS_TEAM_DIVIDEND_RATIO_BPS', {
+    opsTeamStartupDividendRatioBps: readInt(source, 'OPS_TEAM_STARTUP_DIVIDEND_RATIO_BPS', {
+      min: 0,
+      max: BPS_MAX,
+    }),
+    opsTeamMallDividendRatioBps: readInt(source, 'OPS_TEAM_MALL_DIVIDEND_RATIO_BPS', {
       min: 0,
       max: BPS_MAX,
     }),

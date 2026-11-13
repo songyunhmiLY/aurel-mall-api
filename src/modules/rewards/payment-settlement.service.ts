@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
 import { PRODUCT_ZONE_STARTUP } from '../catalog/catalog.constants';
 import { CofounderDividendService } from '../cofounder/cofounder-dividend.service';
+import { OpsTeamDividendService } from '../ops-team/ops-team-dividend.service';
 import { StudioSubsidyService } from '../studio/studio-subsidy.service';
 import { AwardService } from './award.service';
 import { FilingService } from './filing/filing.service';
@@ -19,6 +20,7 @@ export class PaymentSettlementService {
     private readonly awards: AwardService,
     private readonly cofounders: CofounderDividendService,
     private readonly studios: StudioSubsidyService,
+    private readonly opsTeam: OpsTeamDividendService,
   ) {}
 
   async afterOrderPaid(event: {
@@ -64,6 +66,17 @@ export class PaymentSettlementService {
       event.paidAt,
     );
     await this.studios.onPaidOrder(
+      event.tx,
+      {
+        id: order.id,
+        userId: order.userId,
+        zone: order.zone,
+        goodsTotalFen: order.goodsTotalFen,
+        pvFen: order.pvFen,
+      },
+      event.paidAt,
+    );
+    await this.opsTeam.onPaidOrder(
       event.tx,
       {
         id: order.id,
