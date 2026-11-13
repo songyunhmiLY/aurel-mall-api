@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable, InternalServerErrorException } from '@nestjs/common';
 import { randomBytes } from 'node:crypto';
 import type { MarketTreeNode, Prisma } from '@prisma/client';
+import { ROOT_INVITE_CODE } from '../../users/identity.constants';
 
 const CHILD_SLOTS = 3;
 const MAX_PATH_LENGTH = 2048;
@@ -147,11 +148,12 @@ export class TreesService {
   }
 }
 
-const INVITE_CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-
 async function allocateInviteCode(tx: Tx): Promise<string> {
-  for (let attempt = 0; attempt < 8; attempt += 1) {
-    const inviteCode = randomInviteCode();
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const inviteCode = randomSixDigitCode();
+    if (inviteCode === ROOT_INVITE_CODE) {
+      continue;
+    }
     const taken = await tx.user.findFirst({ where: { inviteCode } });
     if (!taken) {
       return inviteCode;
@@ -160,13 +162,9 @@ async function allocateInviteCode(tx: Tx): Promise<string> {
   throw new InternalServerErrorException('入座失败');
 }
 
-function randomInviteCode(): string {
-  const bytes = randomBytes(8);
-  let code = '';
-  for (const byte of bytes) {
-    code += INVITE_CODE_ALPHABET[byte % INVITE_CODE_ALPHABET.length] ?? 'A';
-  }
-  return code;
+function randomSixDigitCode(): string {
+  const value = randomBytes(4).readUInt32BE(0) % 1_000_000;
+  return value.toString().padStart(6, '0');
 }
 
 function groupChildren(parents: MarketTreeNode[], rows: MarketTreeNode[]): MarketTreeNode[][] {

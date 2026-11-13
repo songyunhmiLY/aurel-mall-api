@@ -64,7 +64,7 @@ export type Stage2 = ReturnType<typeof buildStage2>;
 
 export async function boot(stage: Stage2): Promise<bigint> {
   await stage.users.onModuleInit();
-  const root = stage.db.user.rows.find((row) => row.inviteCode === 'ROOT');
+  const root = stage.db.user.rows.find((row) => row.inviteCode === '000000');
   if (!root) {
     throw new Error('missing root');
   }

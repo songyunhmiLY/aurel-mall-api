@@ -273,6 +273,8 @@ describe('orders and forced payment', () => {
         items: [{ productId: product.id, quantity: 1 }],
       }),
     ).rejects.toThrow('缺少邀请关系');
+    expect(stage.db.inviteTreeNode.rows.some((row) => row.userId === stranger)).toBe(false);
+    expect(marketNode(stage.db, stranger)?.parentUserId).not.toBe(rootId);
   });
 
   it('rejects a mall order from a non-member and lets a member pay with consumption before withdrawable', async () => {

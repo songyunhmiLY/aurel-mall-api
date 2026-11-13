@@ -62,6 +62,37 @@ describe('invite registration', () => {
     expect(stage.db.user.rows.find((row) => row.id === session.user.id)?.member).toBe(false);
   });
 
+  it('does not attach a user to the root when they never submit an invite code', async () => {
+    const stage = buildStage2();
+    const rootId = await boot(stage);
+    expect(stage.db.user.rows.find((row) => row.id === rootId)?.inviteCode).toBe('000000');
+    const buyer = await loginBuyer(stage, 'unbound', null);
+    const again = await stage.users.loginWithMiniProgram('unbound');
+    expect(again.user.inviteCode).toBeNull();
+    expect(stage.db.inviteTreeNode.rows.filter((row) => row.userId === buyer)).toHaveLength(0);
+
+    const product = await stage.catalog.create({
+      zone: PRODUCT_ZONE_STARTUP,
+      name: '创业装',
+      freightFen: 0,
+      stockQuantity: 2,
+      status: 'on',
+    });
+    const addressId = await addressOf(stage, buyer);
+    await expect(
+      stage.orders.create(buyer, {
+        zone: PRODUCT_ZONE_STARTUP,
+        addressId,
+        items: [{ productId: product.product.id, quantity: 1 }],
+      }),
+    ).rejects.toThrow('缺少邀请关系');
+    expect(stage.db.inviteTreeNode.rows.filter((row) => row.userId === buyer)).toHaveLength(0);
+    expect(marketNode(stage.db, buyer)).toBeNull();
+    expect(stage.db.inviteTreeNode.rows.filter((row) => row.parentUserId === rootId)).toHaveLength(
+      0,
+    );
+  });
+
   it('binds under root or another member, then seats the buyer under that inviter', async () => {
     const stage = buildStage2();
     const rootId = await boot(stage);
@@ -69,7 +100,8 @@ describe('invite registration', () => {
     expect(stage.db.user.rows.find((row) => row.id === sponsor)?.inviteCode).toBeNull();
     expect(stage.db.inviteTreeNode.rows.some((row) => row.userId === sponsor)).toBe(false);
 
-    const underRoot = await stage.users.bindInviter(sponsor, 'ROOT');
+    const underRoot = await stage.users.bindInviter(sponsor, '000000');
+    expect(underRoot.inviteCode).toBe('000000');
     expect(underRoot.inviterId).toBe(rootId);
     expect(marketNode(stage.db, sponsor)).toBeNull();
 
@@ -89,8 +121,8 @@ describe('invite registration', () => {
     });
     await stage.orders.pay(sponsor, sponsorOrder.id);
     const sponsorCode = stage.db.user.rows.find((row) => row.id === sponsor)?.inviteCode;
-    expect(typeof sponsorCode).toBe('string');
-    expect(sponsorCode).not.toBe(ROOT_INVITE_CODE);
+    expect(sponsorCode).toMatch(/^\d{6}$/);
+    expect(sponsorCode).not.toBe('000000');
     expect(marketNode(stage.db, sponsor)?.parentUserId).toBe(rootId);
     const sponsorInvite = stage.db.inviteTreeNode.rows.find((row) => row.userId === sponsor);
     expect(sponsorInvite?.parentUserId).toBe(rootId);
@@ -119,20 +151,21 @@ describe('invite registration', () => {
     const rootId = await boot(stage);
     const buyer = await loginBuyer(stage, 'reject-buyer', null);
     await expect(stage.users.bindInviter(buyer, 'NOPE')).rejects.toThrow('邀请码不正确');
+    await expect(stage.users.bindInviter(buyer, '999999')).rejects.toThrow('邀请码不正确');
 
     const plain = await loginBuyer(stage, 'plain', null);
     await stage.db.user.update({
       where: { id: plain },
-      data: { inviteCode: 'PLAIN' },
+      data: { inviteCode: '111111' },
     });
-    await expect(stage.users.bindInviter(buyer, 'PLAIN')).rejects.toThrow('非会员不能作为邀请人');
+    await expect(stage.users.bindInviter(buyer, '111111')).rejects.toThrow('非会员不能作为邀请人');
     expect(stage.db.inviteTreeNode.rows.some((row) => row.userId === buyer)).toBe(false);
 
     await stage.db.user.update({
       where: { id: buyer },
-      data: { inviteCode: 'MINE' },
+      data: { inviteCode: '222222' },
     });
-    await expect(stage.users.bindInviter(buyer, 'MINE')).rejects.toThrow('不能填写自己的邀请码');
+    await expect(stage.users.bindInviter(buyer, '222222')).rejects.toThrow('不能填写自己的邀请码');
 
     await stage.users.bindInviter(buyer, ROOT_INVITE_CODE);
     await expect(stage.users.bindInviter(buyer, ROOT_INVITE_CODE)).rejects.toThrow(

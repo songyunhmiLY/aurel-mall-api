@@ -17,6 +17,7 @@ import type { AppEnv } from '../../config/app-env';
 import { APP_ENV } from '../../config/tokens';
 import {
   IDENTITY_PROVIDERS,
+  LEGACY_ROOT_INVITE_CODE,
   ROOT_IDENTITY_IDENTIFIER,
   ROOT_INVITE_CODE,
   ROOT_NICKNAME,
@@ -62,6 +63,7 @@ export class UsersService implements OnModuleInit {
   async onModuleInit(): Promise<void> {
     const existing = await this.findRootIdentity();
     if (existing) {
+      await this.renameLegacyRootInviteCode(existing.userId);
       this.logger.log('system root account already exists');
       return;
     }
@@ -122,6 +124,19 @@ export class UsersService implements OnModuleInit {
     this.logger.log('bootstrapped system root account');
   }
 
+  /** 已落库的根邀请码 ROOT 改成 000000。000000 只属于根账户。 */
+  private async renameLegacyRootInviteCode(userId: bigint): Promise<void> {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user || user.inviteCode !== LEGACY_ROOT_INVITE_CODE) {
+      return;
+    }
+    const now = await this.clock.now();
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { inviteCode: ROOT_INVITE_CODE, updatedAt: now },
+    });
+  }
+
   /**
    * 用已有会员的邀请码写邀请上级。不写席位，也不改已经存在的上级。
    * 邀请人必须是未停用的会员。根账户不走这里。
@@ -134,7 +149,7 @@ export class UsersService implements OnModuleInit {
     inviterId: bigint;
   }> {
     const code = inviteCode.trim();
-    if (!/^[A-Za-z0-9]{1,32}$/.test(code)) {
+    if (!/^\d{6}$/.test(code)) {
       throw new BadRequestException('邀请码不正确');
     }
     const now = await this.clock.now();

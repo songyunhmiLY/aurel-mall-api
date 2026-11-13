@@ -21,7 +21,7 @@ describe('market seating', () => {
     const stage = buildStage2();
     const rootId = await (async () => {
       await stage.users.onModuleInit();
-      const root = stage.db.user.rows.find((row) => row.inviteCode === 'ROOT');
+      const root = stage.db.user.rows.find((row) => row.inviteCode === '000000');
       if (!root) {
         throw new Error('missing root');
       }
@@ -57,7 +57,7 @@ describe('market seating', () => {
     const stage = buildStage2();
     const rootId = await (async () => {
       await stage.users.onModuleInit();
-      return stage.db.user.rows.find((row) => row.inviteCode === 'ROOT')!.id;
+      return stage.db.user.rows.find((row) => row.inviteCode === '000000')!.id;
     })();
     const left = 8101n;
     const middle = 8102n;
@@ -92,7 +92,7 @@ describe('market seating', () => {
   it('searches the next level after the current level is full and stays inside the inviter subtree', async () => {
     const stage = buildStage2();
     await stage.users.onModuleInit();
-    const rootId = stage.db.user.rows.find((row) => row.inviteCode === 'ROOT')!.id;
+    const rootId = stage.db.user.rows.find((row) => row.inviteCode === '000000')!.id;
     const level1 = [8301n, 8302n, 8303n];
     level1.forEach((id, index) => graftMarket(stage.db, id, rootId, at(index + 1)));
     const level2: bigint[] = [];
