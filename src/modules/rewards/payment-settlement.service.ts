@@ -43,7 +43,7 @@ export class PaymentSettlementService {
         id: order.id,
         userId: order.userId,
         zone: order.zone,
-        payAmountFen: order.payAmountFen,
+        goodsTotalFen: order.goodsTotalFen,
         pvFen: order.pvFen,
       },
       event.paidAt,

@@ -128,6 +128,7 @@ export class PositionsService implements OnModuleInit {
     const now = await this.clock.now();
     let rank = 1;
     for (const tier of this.locked.positionDividendPools) {
+      const officialName = positionName(tier.positionCode);
       const existing = await this.prisma.position.findUnique({
         where: { code: tier.positionCode },
       });
@@ -136,7 +137,7 @@ export class PositionsService implements OnModuleInit {
           await this.prisma.position.create({
             data: {
               code: tier.positionCode,
-              name: positionName(tier.positionCode),
+              name: officialName,
               rankLevel: rank,
               createdAt: now,
               updatedAt: now,
@@ -147,6 +148,11 @@ export class PositionsService implements OnModuleInit {
             throw error;
           }
         }
+      } else if (officialName !== tier.positionCode && existing.name !== officialName) {
+        await this.prisma.position.update({
+          where: { id: existing.id },
+          data: { name: officialName, updatedAt: now },
+        });
       }
       rank += 1;
     }

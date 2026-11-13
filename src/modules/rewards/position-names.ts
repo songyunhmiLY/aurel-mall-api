@@ -5,8 +5,8 @@
  */
 export const POSITION_NAMES: Record<string, string> = {
   marketing_manager: '营销经理',
-  senior_manager: '高级营销经理',
-  director: '总监',
+  senior_manager: '高级经理',
+  director: '营销总监',
   senior_director: '高级总监',
   chief: '首席',
 };

@@ -210,6 +210,41 @@ describe('stage 4 positions, team windows, and admin lookup', () => {
     ]);
   });
 
+  it('renames previously stored position titles to the official names', async () => {
+    const stage = buildStage4();
+    const now = stage.clock.current;
+    stage.db.position.create({
+      data: {
+        code: 'senior_manager',
+        name: '高级营销经理',
+        rankLevel: 2,
+        createdAt: now,
+        updatedAt: now,
+      },
+    });
+    stage.db.position.create({
+      data: {
+        code: 'director',
+        name: '总监',
+        rankLevel: 3,
+        createdAt: now,
+        updatedAt: now,
+      },
+    });
+    await stage.positions.onModuleInit();
+    expect(stage.db.position.rows.find((row) => row.code === 'senior_manager')?.name).toBe(
+      '高级经理',
+    );
+    expect(stage.db.position.rows.find((row) => row.code === 'director')?.name).toBe('营销总监');
+    expect(stage.db.position.rows.find((row) => row.code === 'marketing_manager')?.name).toBe(
+      '营销经理',
+    );
+    expect(stage.db.position.rows.find((row) => row.code === 'senior_director')?.name).toBe(
+      '高级总监',
+    );
+    expect(stage.db.position.rows.find((row) => row.code === 'chief')?.name).toBe('首席');
+  });
+
   it('uses Shanghai calendar windows for the team page', async () => {
     const stage = buildStage4();
     const rootId = await boot(stage);

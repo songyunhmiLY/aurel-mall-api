@@ -18,7 +18,8 @@ const SOURCE_MALL_POINTS = 'mall_points';
 /**
  * 支付成功后的销售奖和见点奖。与报单是否已经完成无关。
  * 创业专区走邀请树直推销售奖，以及市场上级的见点奖。
- * 商城只走邀请树：第 1 层是销售奖，第 2 到 15 层是见点奖，第 1 层不再领见点奖。
+ * 基数是商品金额（N × 件数），不含运费。
+ * 商城只走邀请树：第 1 层是销售奖，第 2 到 15 层是见点奖，第 1 层不再领见点奖。基数是订单 PV。
  */
 @Injectable()
 export class AwardService {
@@ -33,7 +34,7 @@ export class AwardService {
       id: bigint;
       userId: bigint;
       zone: string;
-      payAmountFen: number;
+      goodsTotalFen: number;
       pvFen: number;
     },
     now: Date,
@@ -49,10 +50,10 @@ export class AwardService {
 
   private async grantStartup(
     tx: Tx,
-    order: { id: bigint; userId: bigint; payAmountFen: number },
+    order: { id: bigint; userId: bigint; goodsTotalFen: number },
     now: Date,
   ): Promise<void> {
-    const base = BigInt(order.payAmountFen);
+    const base = BigInt(order.goodsTotalFen);
     const invite = await tx.inviteTreeNode.findUnique({ where: { userId: order.userId } });
     if (invite?.parentUserId) {
       await this.credits.creditSplit(tx, {

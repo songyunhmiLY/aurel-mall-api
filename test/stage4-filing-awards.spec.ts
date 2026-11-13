@@ -159,7 +159,7 @@ describe('stage 4 filing and awards', () => {
     expect(filingsOf(stage, buyer)).toHaveLength(3);
   });
 
-  it('includes freight in the startup sales base and still files one unit per N', async () => {
+  it('excludes freight from the startup sales and point-seeing base', async () => {
     const stage = buildStage4();
     const rootId = await boot(stage);
     stage.clock.current = APRIL1_10;
@@ -173,6 +173,7 @@ describe('stage 4 filing and awards', () => {
       items: [{ productId: product.id, quantity: 1 }],
     });
     const paid = await stage.orders.pay(buyer, created.id);
+    expect(paid.order.payAmountFen).toBe(100_100);
     expect(paid.order.wechatFen).toBe(100);
     if (!paid.wechat) {
       throw new Error('missing wechat');
@@ -186,9 +187,19 @@ describe('stage 4 filing and awards', () => {
     );
     expect(sales.map((row) => [row.walletType, row.amountFen])).toEqual(
       expect.arrayContaining([
-        ['withdrawable', 4255n],
+        ['withdrawable', 4250n],
         ['points', 250n],
         ['consumption', 500n],
+      ]),
+    );
+    const points = stage.db.walletLedgerEntry.rows.filter(
+      (row) => row.userId === rootId && row.bizType === 'startup_points',
+    );
+    expect(points.map((row) => [row.walletType, row.amountFen])).toEqual(
+      expect.arrayContaining([
+        ['withdrawable', 1700n],
+        ['points', 100n],
+        ['consumption', 200n],
       ]),
     );
   });
