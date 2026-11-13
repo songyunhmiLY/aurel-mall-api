@@ -1,4 +1,6 @@
 import {
+  nextShanghaiDate,
+  previousShanghaiDate,
   shanghaiBizDate,
   startOfShanghaiDay,
   startOfShanghaiMonth,
@@ -13,6 +15,13 @@ describe('Asia/Shanghai calendar', () => {
     const justAfterMidnight = new Date('2026-11-12T16:30:00.000Z');
     expect(startOfShanghaiDay(justAfterMidnight).toISOString()).toBe('2026-11-12T16:00:00.000Z');
     expect(shanghaiBizDate(justAfterMidnight)).toBe('2026-11-13');
+  });
+
+  it('steps across Shanghai midnights, including the month boundary', () => {
+    expect(previousShanghaiDate('2026-04-01')).toBe('2026-03-31');
+    expect(nextShanghaiDate('2026-03-31')).toBe('2026-04-01');
+    expect(shanghaiBizDate(new Date('2026-04-01T15:59:00.000Z'))).toBe('2026-04-01');
+    expect(shanghaiBizDate(new Date('2026-04-01T16:00:00.000Z'))).toBe('2026-04-02');
   });
 
   it('starts the month on the Shanghai first day', () => {

@@ -308,33 +308,38 @@ erDiagram
 
 ## 7. 红包
 
-日计提按 Asia/Shanghai 的日历日一行。开轮时把当时的门槛 K、单轮上限 C 抄进 `red_packet_rounds`。是否每人每轮只能领一次还没定，所以 `round_id + user_id` 只建了普通索引。
+轮次不落全局表。每个会员的已开轮数是累计创业专区微信支付金额除以锁定门槛 K 的整数商。已领金额按人连续累计，记在 `red_packet_payouts`。
+
+`red_packet_signups` 是某个上海自然日的报名，一人一天一行。`red_packet_daily_accruals` 是这一天的奖池和结算结果，`settled_at` 有值后重跑不再发放。`startup_sales_fen` 用当日已支付创业专区订单的 `goods_total_fen`。
+
+`red_packet_rounds` 和 `red_packet_claims` 是需求确认前的占位，福利专场不写入。
 
 ```mermaid
 erDiagram
-  red_packet_rounds ||--o{ red_packet_claims : "round_id"
-  users ||--o{ red_packet_claims : "user_id"
+  users ||--o{ red_packet_signups : "user_id"
+  users ||--o{ red_packet_payouts : "user_id"
 
+  red_packet_signups {
+    bigint id PK
+    bigint user_id
+    char biz_date
+    datetime signed_at
+  }
+  red_packet_payouts {
+    bigint id PK
+    bigint user_id
+    char biz_date
+    bigint amount_fen
+    datetime credited_at
+  }
   red_packet_daily_accruals {
     bigint id PK
     char biz_date UK
     bigint startup_sales_fen
     bigint accrual_fen
-    datetime accrued_at
-  }
-  red_packet_rounds {
-    bigint id PK
-    int round_no UK
-    varchar status
-    int pay_threshold_fen
-    int claim_cap_fen
-    datetime opened_at
-  }
-  red_packet_claims {
-    bigint id PK
-    bigint round_id
-    bigint user_id
-    int amount_fen
-    datetime claimed_at
+    int signup_count
+    bigint share_fen
+    bigint remainder_fen
+    datetime settled_at
   }
 ```

@@ -162,19 +162,56 @@ model UserPosition {
   @@map("user_positions")
 }
 
-/// bizDate 为 Asia/Shanghai 的日历日，格式 YYYY-MM-DD。
+/// 某个上海自然日的红包池。startupSalesFen 是当日已支付创业专区订单的商品金额合计
+/// （orders.goods_total_fen，即 N × 件数，不含运费，含钱包抵扣）。
+/// accrualFen 是按锁定比例向下取整后的奖池。settledAt 有值表示这一天已经结算。
+/// 没人报名时 remainderFen 等于奖池。有人报名时 remainderFen 是均分后留在系统的不足 1 分。
 model RedPacketDailyAccrual {
-  id              BigInt   @id @default(autoincrement())
-  bizDate         String   @unique(map: "red_packet_daily_biz_date_uq") @map("biz_date") @db.Char(10)
-  startupSalesFen BigInt   @map("startup_sales_fen")
-  accrualFen      BigInt   @map("accrual_fen")
-  accruedAt       DateTime @map("accrued_at") @db.DateTime(3)
-  createdAt       DateTime @map("created_at") @db.DateTime(3)
+  id              BigInt    @id @default(autoincrement())
+  bizDate         String    @unique(map: "red_packet_daily_biz_date_uq") @map("biz_date") @db.Char(10)
+  startupSalesFen BigInt    @map("startup_sales_fen")
+  accrualFen      BigInt    @map("accrual_fen")
+  signupCount     Int       @default(0) @map("signup_count")
+  shareFen        BigInt    @default(0) @map("share_fen")
+  distributedFen  BigInt    @default(0) @map("distributed_fen")
+  remainderFen    BigInt    @default(0) @map("remainder_fen")
+  accruedAt       DateTime  @map("accrued_at") @db.DateTime(3)
+  settledAt       DateTime? @map("settled_at") @db.DateTime(3)
+  createdAt       DateTime  @map("created_at") @db.DateTime(3)
 
   @@map("red_packet_daily_accruals")
 }
 
-/// 开轮时把当时的门槛 K、上限 C 抄到本行。status: open / closed。
+/// 会员在某个上海自然日点击抢红包。同一用户同一天一行。
+/// 资格在点击时判断。结算按这一行均分，不因开了更多轮而放大份额。
+model RedPacketSignup {
+  id        BigInt   @id @default(autoincrement())
+  userId    BigInt   @map("user_id")
+  bizDate   String   @map("biz_date") @db.Char(10)
+  signedAt  DateTime @map("signed_at") @db.DateTime(3)
+  createdAt DateTime @map("created_at") @db.DateTime(3)
+
+  @@unique([userId, bizDate], map: "red_packet_signups_user_biz_date_uq")
+  @@index([bizDate, userId], map: "red_packet_signups_biz_date_user_idx")
+  @@map("red_packet_signups")
+}
+
+/// 某日结算发给一名已报名会员的红包。金额全部进入可提现账户，来源 red_packet。
+/// 同一用户同一天一行。份额为 0 时不写这一行。
+model RedPacketPayout {
+  id         BigInt   @id @default(autoincrement())
+  userId     BigInt   @map("user_id")
+  bizDate    String   @map("biz_date") @db.Char(10)
+  amountFen  BigInt   @map("amount_fen")
+  creditedAt DateTime @map("credited_at") @db.DateTime(3)
+  createdAt  DateTime @map("created_at") @db.DateTime(3)
+
+  @@unique([userId, bizDate], map: "red_packet_payouts_user_biz_date_uq")
+  @@index([bizDate], map: "red_packet_payouts_biz_date_idx")
+  @@map("red_packet_payouts")
+}
+
+/// 需求确认前的占位。轮次按每个会员的累计微信支付实付计算，不在这里开全局轮次。本表不写入。
 model RedPacketRound {
   id              BigInt    @id @default(autoincrement())
   roundNo         Int       @unique(map: "red_packet_rounds_round_no_uq") @map("round_no")
@@ -189,6 +226,7 @@ model RedPacketRound {
   @@map("red_packet_rounds")
 }
 
+/// 需求确认前的占位。已领金额记在 red_packet_payouts，不写入本表。
 model RedPacketClaim {
   id        BigInt   @id @default(autoincrement())
   roundId   BigInt   @map("round_id")
