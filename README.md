@@ -359,7 +359,7 @@ curl -X DELETE http://127.0.0.1:3000/api/v1/internal/clock/override
 | 商城见点奖比例 Q | `MALL_POINT_AWARD_RATIO_BPS` | `200`（2%） |
 | 商城奖和职位分红钱包拆分 | `MALL_AWARD_WITHDRAWABLE_BPS`、`_POINTS_BPS`、`_CONSUMPTION_BPS` | `8500` / `1000` / `500` |
 | 职位分红池，从低到高 | `POSITION_DIVIDEND_POOL_BPS` | `marketing_manager:800,senior_manager:600,director:500,senior_director:400,chief:300` |
-| 福利专场当日奖池比例 | `RED_PACKET_DAILY_ACCRUAL_BPS` | `100`（1%）。官方示例是 3% 即 `300`，仓库示例仍是 `100`，上线前由运维确认 |
+| 福利专场当日奖池比例 | `RED_PACKET_DAILY_ACCRUAL_BPS` | `300`（3%，需求示例） |
 | 福利专场实付门槛 K | `RED_PACKET_ROUND_PAY_THRESHOLD_FEN` | `500000`（需求示例 5000 元） |
 | 福利专场每轮领取上限 C | `RED_PACKET_ROUND_CLAIM_CAP_FEN` | `800000`（需求示例 8000 元） |
 | 联合创始人 / 工作室 / 运营团队分红比例 | `COFOUNDER_DIVIDEND_RATIO_BPS`、`STUDIO_DIVIDEND_RATIO_BPS`、`OPERATIONS_TEAM_DIVIDEND_RATIO_BPS` | `3000` / `2000` / `1000`（占位，本阶段不结算） |

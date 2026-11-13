@@ -34,6 +34,7 @@ describe('locked runtime config', () => {
       pointsBps: 1000,
       consumptionBps: 500,
     });
+    expect(env.locked.redPacketDailyAccrualBps).toBe(300);
     expect(env.locked.redPacketRoundPayThresholdFen).toBe(500_000);
     expect(env.locked.redPacketRoundClaimCapFen).toBe(800_000);
     expect(env.locked.positionDividendPools.map((tier) => tier.positionCode)).toEqual([
