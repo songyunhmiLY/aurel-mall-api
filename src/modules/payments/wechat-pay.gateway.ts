@@ -84,6 +84,36 @@ export class WechatPayGateway {
     return { prepayId };
   }
 
+  async createDomesticRefund(input: {
+    merchantId: string;
+    privateKeyPem: string;
+    certificateSerial: string;
+    outTradeNo: string;
+    outRefundNo: string;
+    refundFen: number;
+    totalFen: number;
+  }): Promise<{ refundId: string; status: string }> {
+    const body = JSON.stringify({
+      out_trade_no: input.outTradeNo,
+      out_refund_no: input.outRefundNo,
+      amount: { refund: input.refundFen, total: input.totalFen, currency: 'CNY' },
+    });
+    const response = await this.signedFetch('POST', '/v3/refund/domestic/refunds', body, input);
+    const payload = await readJson(response);
+    if (!response.ok) {
+      const code =
+        typeof payload.code === 'string' ? payload.code : 'HTTP_' + String(response.status);
+      this.logger.warn(`wechat refund failed: ${code}`);
+      throw new BadGatewayException(wechatErrorMessage(payload));
+    }
+    const status = typeof payload.status === 'string' ? payload.status : '';
+    const refundId = typeof payload.refund_id === 'string' ? payload.refund_id : '';
+    if (status !== 'SUCCESS' && status !== 'PROCESSING') {
+      throw new BadGatewayException('微信退款未受理');
+    }
+    return { refundId, status };
+  }
+
   async verifyAndDecrypt(
     credentials: WechatPayCredentials,
     rawBody: string,

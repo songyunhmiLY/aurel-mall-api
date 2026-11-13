@@ -1,6 +1,6 @@
 # 奥瑞尔经销商城 API
 
-经销商城后端。当前包含工程骨架、业务时钟、管理员登录、小程序登录、实名、收货地址、商品上下架、订单支付、三个钱包账户、创业专区支付成功后的入座，以及微信支付下单与回调。购物车、商城退款、提现、奖励结算和消息推送还没做。
+经销商城后端。当前包含工程骨架、业务时钟、管理员登录、小程序登录、实名、收货地址、商品上下架、订单支付、三个钱包账户、消费账户划转、提现审核、商城退款审核、创业专区支付成功后的入座，以及微信支付下单与回调。购物车、奖励结算和消息推送还没做。
 
 同级仓库：
 
@@ -103,7 +103,7 @@ src/
     catalog/              # 创业专区与会员商城
     orders/               # 下单、支付拆分、发货
     payments/             # 微信支付下单、回调、商户配置
-    wallet/               # 积分、可提现、消费账户
+    wallet/               # 积分、可提现、消费账户、划转、提现
     cms/                  # Banner / 文章 / 滚动条占位
     rewards/              # 奖励，以及 trees、filing、positions、red-packet
     settings/             # 仅营销经理门槛 T
@@ -121,7 +121,7 @@ docs/er.md                # 逻辑 ER 图
 - 失败：HTTP 状态与 `code` 相同，`message` 为原因，`data` 一般为 `null`
 - 健康检查：`GET /api/v1/health`
 
-对外业务路由包括健康检查、时钟、管理员登录、小程序登录、实名、收货地址、商品、钱包余额、订单支付、发货，以及微信支付。购物车、商城退款、提现和奖励结算还没有接口。JSON 里的 bigint 编号和金额里的 bigint 都是十进制字符串。
+对外业务路由包括健康检查、时钟、管理员登录、小程序登录、实名、收货地址、商品、钱包余额和流水、消费账户划转、提现、商城退款、订单支付、发货，以及微信支付。购物车和奖励结算还没有接口。JSON 里的 bigint 编号和金额里的 bigint 都是十进制字符串。
 
 ## 认证
 
@@ -298,6 +298,7 @@ curl -X DELETE http://127.0.0.1:3000/api/v1/internal/clock/override
 | 红包轮次实付门槛 K                     | `RED_PACKET_ROUND_PAY_THRESHOLD_FEN`                                                              | `500000`（需求示例 5000 元）            |
 | 每轮领取上限 C                         | `RED_PACKET_ROUND_CLAIM_CAP_FEN`                                                                  | `800000`（需求示例 8000 元）            |
 | 联合创始人 / 工作室 / 运营团队分红比例 | `COFOUNDER_DIVIDEND_RATIO_BPS`、`STUDIO_DIVIDEND_RATIO_BPS`、`OPERATIONS_TEAM_DIVIDEND_RATIO_BPS` | `3000` / `2000` / `1000`（示例）        |
+| 提现手续费                             | `WITHDRAWAL_FEE_FEN`                                                                              | `0`（示例，正式金额未确认）             |
 
 每组钱包拆分必须合计 `10000`，目标是可提现余额 `withdrawable` 和积分 `points`。对不上时进程拒绝启动。除 K、C 外，上表数字都是占位，不是已确认的产品规则。职位编码要以后和 `positions.code` 对上，目前不预置职位数据。
 
@@ -312,15 +313,92 @@ T **不是**锁定项。环境变量 `MARKETING_MANAGER_MARKET_THRESHOLD_DEFAULT
 
 ## 钱包
 
-每个用户有三个账户：`points`（积分）、`withdrawable`（可提现）、`consumption`（消费）。余额单位是分。同一用户不能在这三个账户之间互转。本阶段没有转账、提现申请，也没有提现分类接口。
+每个用户有三个账户：`points`（积分）、`withdrawable`（可提现）、`consumption`（消费）。余额单位是分。同一用户不能在这三个账户之间互转。
 
 需要用户令牌：
 
 - `GET /api/v1/me/wallets`
+- `GET /api/v1/me/wallets/:walletType/ledger?page=&pageSize=`，`walletType` 为 `points`、`withdrawable` 或 `consumption`
+- `GET /api/v1/me/wallets/withdrawable/categories`
+- `GET /api/v1/me/wallets/withdrawable/categories/ledger?displayName=&page=&pageSize=`
 
-`data` 为 `{ "points", "withdrawable", "consumption" }`。每个账户有 `balanceFen`、`frozenFen`、`availableFen`。可用额 = 余额 − 冻结。这三个数在 JSON 里是十进制字符串。还没有流水时三个账户都是 0。冻结只在订单已经占用、但微信支付还没成功时大于 0。
+`GET /me/wallets` 的 `data` 为 `{ "points", "withdrawable", "consumption" }`。每个账户有 `balanceFen`、`frozenFen`、`availableFen`。可用额 = 余额 − 冻结。这三个数在 JSON 里是十进制字符串。还没有流水时三个账户都是 0。冻结包括待微信支付确认的占用，以及提现申请冻结的金额。
 
-扣款会写 `wallet_ledger_entries`：`direction` 为 `debit`，`bizType` 为 `order_payment`，`bizId` 是订单 id。冻结和释放不写流水，因为余额还没变。
+扣款和入账写 `wallet_ledger_entries`。冻结和释放不写流水，因为余额还没变。订单支付的 `bizType` 仍是 `order_payment`。可提现入账可以带 `sourceCode`，显示名不写在流水上。
+
+可提现账户可以按显示名查看分类合计和流水。来源目前是奖励流水里已经预留的九个编码，默认显示名等于编码。管理端把多个来源改成同一个显示名后，会员侧按显示名文本合成一个分类。官方需求里的七个中文默认名还没有写进本仓库，所以这里没有预置中文名，也不接受这九个编码以外的来源。
+
+需要管理员令牌：
+
+- `GET /api/v1/admin/settings/withdrawal-display-names`
+- `PUT /api/v1/admin/settings/withdrawal-display-names`，body：`{ "items": [{ "sourceCode": "mall_sales", "displayName": "销售奖" }] }`
+
+## 消费账户划转
+
+双方都必须已经是会员。付款人先按对方的用户 id 查询；id 不存在或对方不是会员时返回 400「对方不是会员」，不会进入确认。确认时返回对方的 `nickname`。划转时再提交金额和支付密码。密码错误则不动余额。
+
+只从付款人消费账户的可用余额划到收款人的消费账户。没有手续费，也没有额外的单笔或每日上限。积分和可提现账户不能这样划。不能转给自己。不检查实名。
+
+支付密码此前没有表。`POST /api/v1/me/payment-password` 首次设置，body：`{ "password": "..." }`。需求没有规定位数和字符集，当前接受 6 到 64 位且不含空白。已设置后再调返回 409。还没有重置接口。
+
+需要用户令牌：
+
+- `GET /api/v1/me/payment-password`，`data` 为 `{ "set": true }` 或 `{ "set": false }`
+- `POST /api/v1/me/payment-password`
+- `POST /api/v1/me/transfers/lookup`，body：`{ "payeeId": "2" }`
+- `POST /api/v1/me/transfers`，body：`{ "payeeId": "2", "amountFen": "400", "paymentPassword": "123456" }`
+
+划转成功时两边各写一条 `consumption_transfer` 流水，`bizId` 相同。非会员付款人返回 403「非会员不能划转」。
+
+## 提现
+
+只有会员可以提现。非会员即使可提现账户有余额也返回 403「非会员不能提现」。必须已经实名，否则 403「请先完成实名认证」。申请金额至少 100 元（10000 分）。
+
+收款账户要事先保存，字段是开户名、开户银行、银行卡号、开户支行。一个用户当前一条。申请时把当时的四个字段抄到申请上，之后再改账户不影响这笔申请。
+
+申请时冻结申请金额，不写扣款流水。驳回则解冻。财务线下打款。管理端把申请标成已打款或驳回。打款金额 = 申请金额 − 打款当时的 `WITHDRAWAL_FEE_FEN`。手续费在申请之后、打款之前变了，用打款当时的值。手续费高于申请金额时不能打款，冻结保持不变。每笔申请在驳回或打款时写一条结算记录。打款会从可提现账户扣掉全部申请金额，并在现金流水记一笔实际打出的金额。
+
+有状态为待审核的商城退款时不能申请提现。
+
+需要用户令牌：
+
+- `GET|PUT /api/v1/me/bank-account`
+- `POST /api/v1/me/withdrawals`，body：`{ "amountFen": "10000" }`
+- `GET /api/v1/me/withdrawals?page=&pageSize=`
+- `GET /api/v1/me/withdrawals/:id`
+
+需要管理员令牌：
+
+- `GET /api/v1/admin/withdrawals?status=&userId=&page=&pageSize=`
+- `GET /api/v1/admin/withdrawals/:id`
+- `POST /api/v1/admin/withdrawals/:id/reject`
+- `POST /api/v1/admin/withdrawals/:id/payout`
+
+状态是 `pending`、`rejected`、`paid`。
+
+## 商城退款
+
+只适用于会员商城里已支付或已发货的订单。创业专区返回 400「创业专区订单不能退款」。用户申请时不填写金额。返回里的 `freightFen` 和 `deductionHint` 只是提示运费等费用可以减扣，系统不会把运费自动算进减扣。
+
+有状态为 `pending` 的提现时不能申请退款。提现驳回或打款、冻结清除之后可以申请。
+
+审核人员只填 `refundFen` 或 `deductionFen` 里的一个。系统用订单应付（含该单运费）算出另一个：退款 + 减扣 = 应付。减扣先冲这单的微信支付部分，再冲这单支付时用掉的可提现部分，还剩的再从退回消费账户的金额里扣。微信实退加上消费账户入账等于退款金额。可提现部分里没有被减扣的余额退回消费账户，不退回可提现账户，也不再扣用户当前的可提现余额。已发放的奖励和商城分红池不回滚。订单状态保持已支付或已发货。
+
+没有配齐微信商户资料时，微信部分记为 `sandbox`，不调用微信。已配齐时向微信申请退款，受理后记为 `accepted`，并写现金流出。微信拒收时退款申请仍是待审核，不动余额。
+
+需要用户令牌：
+
+- `POST /api/v1/orders/:id/refunds`
+- `GET /api/v1/me/refunds?page=&pageSize=`
+- `GET /api/v1/me/refunds/:id`
+
+需要管理员令牌：
+
+- `GET /api/v1/admin/refunds?status=&userId=&page=&pageSize=`
+- `POST /api/v1/admin/refunds/:id/approve`，body 只含 `{ "refundFen": 9000 }` 或 `{ "deductionFen": 1000 }`
+- `POST /api/v1/admin/refunds/:id/reject`
+
+状态是 `pending`、`approved`、`rejected`。
 
 ## 订单
 
@@ -328,7 +406,7 @@ T **不是**锁定项。环境变量 `MARKETING_MANAGER_MARKET_THRESHOLD_DEFAULT
 
 行商品金额 = 单价 × 数量。行运费 = 商品 `freightFen` × 数量。行 PV = 单价 PV × 数量。订单商品金额、运费、应付、PV 分别是各行之和。应付 = 商品金额 + 运费。PV 不是售价。创业专区单价 PV 按 0 记，订单 PV 为 0。
 
-创业专区每件商品的单价是锁定单价 N。应付里的商品金额是 N 的整数倍。运费按商品上的 `freightFen` 另加，不另做地区运费。创业专区订单不能退款；本阶段也没有商城退款接口。
+创业专区每件商品的单价是锁定单价 N。应付里的商品金额是 N 的整数倍。运费按商品上的 `freightFen` 另加，不另做地区运费。创业专区订单不能退款。会员商城订单可以申请退款，见上面的商城退款。
 
 会员商城只有会员能下单。非会员返回 403，文案为「非会员不能购买会员商城」。
 

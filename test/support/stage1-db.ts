@@ -280,6 +280,15 @@ export class Stage1Db {
   readonly walletAccount = new MemoryTable([['userId', 'walletType']]);
   readonly walletLedgerEntry = new MemoryTable([]);
   readonly walletHold = new MemoryTable([['orderId', 'walletType']]);
+  readonly consumptionTransfer = new MemoryTable([]);
+  readonly userPaymentPassword = new MemoryTable([['userId']]);
+  readonly userBankAccount = new MemoryTable([['userId']]);
+  readonly withdrawalApplication = new MemoryTable([]);
+  readonly withdrawalSettlement = new MemoryTable([['applicationId']]);
+  readonly withdrawalDisplaySource = new MemoryTable([['sourceCode']]);
+  readonly cashLedgerEntry = new MemoryTable([]);
+  readonly orderRefund = new MemoryTable([['wechatRefundNo']]);
+  readonly rewardLedgerEntry = new MemoryTable([]);
 
   async $queryRaw(
     strings: TemplateStringsArray,
@@ -355,6 +364,15 @@ export class Stage1Db {
       this.walletAccount,
       this.walletLedgerEntry,
       this.walletHold,
+      this.consumptionTransfer,
+      this.userPaymentPassword,
+      this.userBankAccount,
+      this.withdrawalApplication,
+      this.withdrawalSettlement,
+      this.withdrawalDisplaySource,
+      this.cashLedgerEntry,
+      this.orderRefund,
+      this.rewardLedgerEntry,
     ];
   }
 }

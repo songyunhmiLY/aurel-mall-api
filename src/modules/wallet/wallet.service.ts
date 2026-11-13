@@ -15,8 +15,10 @@ import {
   LEDGER_DEBIT,
   LEDGER_ORDER_PAYMENT,
   WALLET_TYPES,
+  WALLET_WITHDRAWABLE,
   type WalletType,
   isWalletType,
+  isWithdrawalDisplaySource,
 } from './wallet.constants';
 
 export interface WalletBalanceView {
@@ -33,9 +35,28 @@ export interface WalletBalancesView {
 
 type Tx = Prisma.TransactionClient;
 
+export interface WalletLedgerView {
+  id: bigint;
+  walletType: string;
+  direction: string;
+  amountFen: bigint;
+  balanceAfterFen: bigint;
+  bizType: string;
+  bizId: string;
+  sourceCode: string | null;
+  occurredAt: string;
+}
+
+export interface WalletLedgerPage {
+  items: WalletLedgerView[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
 /**
  * 三个账户：积分、可提现、消费。
- * 本阶段只支持支付扣款和余额查询。不做账户互转、提现申请或提现分类。
+ * 支付扣款、划转、提现冻结和商城退款入账都走这里。本人三个账户之间不能互转。
  */
 @Injectable()
 export class WalletService {
@@ -54,8 +75,8 @@ export class WalletService {
   }
 
   /**
-   * 给账户加款并记流水。支付不调用它。测试和以后的奖励入账用。
-   * 不提供用户之间或本人三个账户之间的划转接口。
+   * 给账户加款并记流水。支付不调用它。测试、奖励入账、划转和退款入账用。
+   * 不提供本人三个账户之间的划转。
    */
   async credit(input: {
     userId: bigint;
@@ -63,35 +84,211 @@ export class WalletService {
     amountFen: bigint;
     bizType: string;
     bizId: string;
+    sourceCode?: string | null;
   }): Promise<void> {
     const walletType = parseWalletType(input.walletType);
+    const sourceCode = normalizeSource(walletType, input.sourceCode);
     if (input.amountFen <= 0n) {
       throw new BadRequestException('金额不正确');
     }
     const now = await this.clock.now();
     await this.prisma.$transaction(async (tx) => {
       await this.lockAll(tx, input.userId, now);
-      const account = await this.requireAccount(tx, input.userId, walletType);
-      const balanceFen = account.balanceFen + input.amountFen;
-      await tx.walletAccount.update({
-        where: { id: account.id },
-        data: { balanceFen, updatedAt: now },
-      });
-      await tx.walletLedgerEntry.create({
-        data: {
-          accountId: account.id,
+      await this.creditInTx(
+        tx,
+        {
           userId: input.userId,
           walletType,
-          direction: LEDGER_CREDIT,
           amountFen: input.amountFen,
-          balanceAfterFen: balanceFen,
           bizType: input.bizType,
           bizId: input.bizId,
-          occurredAt: now,
-          createdAt: now,
+          sourceCode,
         },
-      });
+        now,
+      );
     });
+  }
+
+  async listLedger(
+    userId: bigint,
+    walletTypeRaw: string,
+    page: number,
+    pageSize: number,
+  ): Promise<WalletLedgerPage> {
+    const walletType = parseWalletType(walletTypeRaw);
+    await this.getBalances(userId);
+    const where = { userId, walletType };
+    const [total, rows] = await Promise.all([
+      this.prisma.walletLedgerEntry.count({ where }),
+      this.prisma.walletLedgerEntry.findMany({
+        where,
+        orderBy: [{ occurredAt: 'desc' }, { id: 'desc' }],
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+      }),
+    ]);
+    return {
+      items: rows.map(toLedger),
+      total,
+      page,
+      pageSize,
+    };
+  }
+
+  async creditInTx(
+    tx: Tx,
+    input: {
+      userId: bigint;
+      walletType: WalletType;
+      amountFen: bigint;
+      bizType: string;
+      bizId: string;
+      sourceCode: string | null;
+    },
+    now: Date,
+  ): Promise<void> {
+    if (input.amountFen <= 0n) {
+      return;
+    }
+    const account = await this.requireAccount(tx, input.userId, input.walletType);
+    const balanceFen = account.balanceFen + input.amountFen;
+    await tx.walletAccount.update({
+      where: { id: account.id },
+      data: { balanceFen, updatedAt: now },
+    });
+    await tx.walletLedgerEntry.create({
+      data: {
+        accountId: account.id,
+        userId: input.userId,
+        walletType: input.walletType,
+        direction: LEDGER_CREDIT,
+        amountFen: input.amountFen,
+        balanceAfterFen: balanceFen,
+        bizType: input.bizType,
+        bizId: input.bizId,
+        sourceCode: input.sourceCode,
+        occurredAt: now,
+        createdAt: now,
+      },
+    });
+  }
+
+  /** 从可用余额扣款。调用方需要先 lockAll。 */
+  async debitAvailable(
+    tx: Tx,
+    userId: bigint,
+    walletType: WalletType,
+    amountFen: bigint,
+    bizType: string,
+    bizId: string,
+    now: Date,
+  ): Promise<void> {
+    if (amountFen <= 0n) {
+      throw new BadRequestException('金额不正确');
+    }
+    const account = await this.requireAccount(tx, userId, walletType);
+    const available = account.balanceFen - account.frozenFen;
+    if (available < amountFen || account.balanceFen < amountFen) {
+      throw new ConflictException('余额不足');
+    }
+    const balanceFen = account.balanceFen - amountFen;
+    await tx.walletAccount.update({
+      where: { id: account.id },
+      data: { balanceFen, updatedAt: now },
+    });
+    await this.writeDebit(
+      tx,
+      account,
+      userId,
+      walletType,
+      amountFen,
+      balanceFen,
+      bizType,
+      bizId,
+      now,
+    );
+  }
+
+  /** 冻结可用余额，不写流水。调用方需要先 lockAll。 */
+  async freezeAmount(
+    tx: Tx,
+    userId: bigint,
+    walletType: WalletType,
+    amountFen: bigint,
+    now: Date,
+  ): Promise<void> {
+    if (amountFen <= 0n) {
+      throw new BadRequestException('金额不正确');
+    }
+    const account = await this.requireAccount(tx, userId, walletType);
+    const available = account.balanceFen - account.frozenFen;
+    if (available < amountFen) {
+      throw new ConflictException('余额不足');
+    }
+    await tx.walletAccount.update({
+      where: { id: account.id },
+      data: { frozenFen: account.frozenFen + amountFen, updatedAt: now },
+    });
+  }
+
+  /** 释放先前冻结的金额，不写流水。调用方需要先 lockAll。 */
+  async releaseFreeze(
+    tx: Tx,
+    userId: bigint,
+    walletType: WalletType,
+    amountFen: bigint,
+    now: Date,
+  ): Promise<void> {
+    if (amountFen <= 0n) {
+      throw new BadRequestException('金额不正确');
+    }
+    const account = await this.requireAccount(tx, userId, walletType);
+    if (account.frozenFen < amountFen) {
+      throw new ConflictException('余额不足');
+    }
+    await tx.walletAccount.update({
+      where: { id: account.id },
+      data: { frozenFen: account.frozenFen - amountFen, updatedAt: now },
+    });
+  }
+
+  /** 把已冻结金额扣成实付，并写借记流水。调用方需要先 lockAll。 */
+  async captureFrozen(
+    tx: Tx,
+    userId: bigint,
+    walletType: WalletType,
+    amountFen: bigint,
+    bizType: string,
+    bizId: string,
+    now: Date,
+  ): Promise<void> {
+    if (amountFen <= 0n) {
+      throw new BadRequestException('金额不正确');
+    }
+    const account = await this.requireAccount(tx, userId, walletType);
+    if (account.frozenFen < amountFen || account.balanceFen < amountFen) {
+      throw new ConflictException('余额不足');
+    }
+    const balanceFen = account.balanceFen - amountFen;
+    await tx.walletAccount.update({
+      where: { id: account.id },
+      data: {
+        balanceFen,
+        frozenFen: account.frozenFen - amountFen,
+        updatedAt: now,
+      },
+    });
+    await this.writeDebit(
+      tx,
+      account,
+      userId,
+      walletType,
+      amountFen,
+      balanceFen,
+      bizType,
+      bizId,
+      now,
+    );
   }
 
   async lockAll(tx: Tx, userId: bigint, now: Date): Promise<void> {
@@ -189,7 +386,8 @@ export class WalletService {
         hold.walletType,
         hold.amountFen,
         balanceFen,
-        orderId,
+        LEDGER_ORDER_PAYMENT,
+        orderId.toString(),
         now,
       );
       await tx.walletHold.update({
@@ -221,7 +419,17 @@ export class WalletService {
       where: { id: account.id },
       data: { balanceFen, updatedAt: now },
     });
-    await this.writeDebit(tx, account, userId, walletType, amountFen, balanceFen, orderId, now);
+    await this.writeDebit(
+      tx,
+      account,
+      userId,
+      walletType,
+      amountFen,
+      balanceFen,
+      LEDGER_ORDER_PAYMENT,
+      orderId.toString(),
+      now,
+    );
   }
 
   async releaseHolds(tx: Tx, orderId: bigint, now: Date): Promise<void> {
@@ -260,7 +468,8 @@ export class WalletService {
     walletType: WalletType,
     amountFen: bigint,
     balanceFen: bigint,
-    orderId: bigint,
+    bizType: string,
+    bizId: string,
     now: Date,
   ): Promise<void> {
     await tx.walletLedgerEntry.create({
@@ -271,8 +480,9 @@ export class WalletService {
         direction: LEDGER_DEBIT,
         amountFen,
         balanceAfterFen: balanceFen,
-        bizType: LEDGER_ORDER_PAYMENT,
-        bizId: orderId.toString(),
+        bizType,
+        bizId,
+        sourceCode: null,
         occurredAt: now,
         createdAt: now,
       },
@@ -321,6 +531,43 @@ function parseWalletType(value: string): WalletType {
     throw new BadRequestException('钱包类型不正确');
   }
   return value;
+}
+
+function normalizeSource(
+  walletType: WalletType,
+  sourceCode: string | null | undefined,
+): string | null {
+  if (sourceCode === undefined || sourceCode === null || sourceCode === '') {
+    return null;
+  }
+  if (walletType !== WALLET_WITHDRAWABLE || !isWithdrawalDisplaySource(sourceCode)) {
+    throw new BadRequestException('提现分类来源不正确');
+  }
+  return sourceCode;
+}
+
+function toLedger(row: {
+  id: bigint;
+  walletType: string;
+  direction: string;
+  amountFen: bigint;
+  balanceAfterFen: bigint;
+  bizType: string;
+  bizId: string;
+  sourceCode?: string | null;
+  occurredAt: Date;
+}): WalletLedgerView {
+  return {
+    id: row.id,
+    walletType: row.walletType,
+    direction: row.direction,
+    amountFen: row.amountFen,
+    balanceAfterFen: row.balanceAfterFen,
+    bizType: row.bizType,
+    bizId: row.bizId,
+    sourceCode: row.sourceCode ?? null,
+    occurredAt: row.occurredAt.toISOString(),
+  };
 }
 
 function toBalances(rows: WalletAccount[]): WalletBalancesView {

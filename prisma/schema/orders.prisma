@@ -77,3 +77,33 @@ model Payment {
   @@index([status], map: "payments_status_idx")
   @@map("payments")
 }
+
+/// status: pending / approved / rejected。
+/// 申请时不写退款金额和减扣金额。审核通过时两者补齐，且之和等于订单应付。
+/// 创业专区订单不能写入通过状态。已发奖励不在这张表回滚。
+model OrderRefund {
+  id                       BigInt    @id @default(autoincrement())
+  orderId                  BigInt    @map("order_id")
+  userId                   BigInt    @map("user_id")
+  status                   String    @db.VarChar(32)
+  payAmountFen             Int       @map("pay_amount_fen")
+  freightFen               Int       @map("freight_fen")
+  refundFen                Int?      @map("refund_fen")
+  deductionFen             Int?      @map("deduction_fen")
+  wechatRefundFen          Int?      @map("wechat_refund_fen")
+  withdrawableDeductionFen Int?      @map("withdrawable_deduction_fen")
+  consumptionCreditFen     Int?      @map("consumption_credit_fen")
+  /// none / sandbox / accepted。没有商户资料时记 sandbox，不调用微信。
+  wechatRefundStatus       String?   @map("wechat_refund_status") @db.VarChar(32)
+  wechatRefundNo           String?   @unique(map: "order_refunds_wechat_refund_no_uq") @map("wechat_refund_no") @db.VarChar(64)
+  appliedAt                DateTime  @map("applied_at") @db.DateTime(3)
+  decidedAt                DateTime? @map("decided_at") @db.DateTime(3)
+  decidedByAdminId         BigInt?   @map("decided_by_admin_id")
+  createdAt                DateTime  @map("created_at") @db.DateTime(3)
+  updatedAt                DateTime  @map("updated_at") @db.DateTime(3)
+
+  @@index([userId, status], map: "order_refunds_user_status_idx")
+  @@index([orderId, status], map: "order_refunds_order_status_idx")
+  @@index([status, appliedAt], map: "order_refunds_status_applied_idx")
+  @@map("order_refunds")
+}

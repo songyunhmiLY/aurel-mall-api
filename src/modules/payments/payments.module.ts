@@ -12,6 +12,6 @@ import { WechatPayService } from './wechat-pay.service';
   imports: [AuthModule, ClockModule, forwardRef(() => OrdersModule)],
   controllers: [WechatPayController, WechatPaySettingsController],
   providers: [WechatPayService, WechatPaySettingsService, WechatPayGateway],
-  exports: [WechatPayService],
+  exports: [WechatPayService, WechatPayGateway, WechatPaySettingsService],
 })
 export class PaymentsModule {}

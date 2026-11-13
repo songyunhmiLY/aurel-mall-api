@@ -55,6 +55,7 @@ export function buildStage2(unitPriceFen = 1000) {
   const gateway = {
     createJsapiTransaction: jest.fn(),
     verifyAndDecrypt: jest.fn(),
+    createDomesticRefund: jest.fn(),
   };
   const wechatPay = new WechatPayService(
     prisma,

@@ -178,7 +178,7 @@ erDiagram
 
 ## 4. 钱包流水
 
-账户类型是 `points`（积分）、`withdrawable`（可提现）和 `consumption`（消费）。同一用户每种类型一行。`frozen_fen` 是待微信支付确认的占用。`wallet_holds.status` 是 `held` / `captured` / `released`。
+账户类型是 `points`（积分）、`withdrawable`（可提现）和 `consumption`（消费）。同一用户每种类型一行。`frozen_fen` 含待微信支付确认的占用和提现申请冻结。`wallet_holds.status` 是 `held` / `captured` / `released`。可提现入账可以带 `source_code`。消费账户划转、提现申请与结算、收款账户、支付密码、显示名、商城退款和现金流出另表记录。现金流水只追加。
 
 ```mermaid
 erDiagram
