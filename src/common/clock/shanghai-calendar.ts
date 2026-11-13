@@ -26,8 +26,52 @@ export function startOfShanghaiDay(instant: Date): Date {
   return fromShanghaiWall(wall.year, wall.monthIndex, wall.day);
 }
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
 export function startOfNextShanghaiDay(instant: Date): Date {
-  return new Date(startOfShanghaiDay(instant).getTime() + 24 * 60 * 60 * 1000);
+  return new Date(startOfShanghaiDay(instant).getTime() + DAY_MS);
+}
+
+export function addShanghaiDays(instant: Date, days: number): Date {
+  return new Date(instant.getTime() + days * DAY_MS);
+}
+
+/** 区间 [from, until) 碰到的每个上海自然日，按时间升序。 */
+export function shanghaiDaysOverlapping(from: Date, until: Date): string[] {
+  if (until.getTime() <= from.getTime()) {
+    return [];
+  }
+  const days: string[] = [];
+  let cursor = startOfShanghaiDay(from);
+  while (cursor.getTime() < until.getTime()) {
+    days.push(shanghaiBizDate(cursor));
+    cursor = addShanghaiDays(cursor, 1);
+    if (days.length > 400) {
+      throw new Error('区间过长');
+    }
+  }
+  return days;
+}
+
+/** until 之前那一毫秒所在的上海自然日。until 落在 00:00 时就是前一天。 */
+export function shanghaiBizDateBefore(until: Date): string {
+  return shanghaiBizDate(new Date(until.getTime() - 1));
+}
+
+/**
+ * 带时区的 ISO 时刻。不接受没有时区的时间，避免把机器本地时区当成上海。
+ * 日期请走 YYYY-MM-DD，不要走这里。
+ */
+export function parseIsoInstant(value: string): Date | null {
+  const text = value.trim();
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/.test(text)) {
+    return null;
+  }
+  const parsed = new Date(text);
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+  return parsed;
 }
 
 export function startOfShanghaiMonth(instant: Date): Date {

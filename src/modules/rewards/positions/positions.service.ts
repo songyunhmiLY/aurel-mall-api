@@ -10,6 +10,7 @@ import type { PositionDividendPeriod, Prisma } from '@prisma/client';
 import { ClockService } from '../../../common/clock/clock.service';
 import {
   isShanghaiBizDate,
+  isShanghaiBizMonth,
   nextBizMonth,
   previousBizMonth,
   shanghaiBizDate,
@@ -105,6 +106,18 @@ export interface UserQualificationView {
     inPool: boolean;
   }>;
   markets: Array<{ userId: bigint; nickname: string; performanceFen: bigint }>;
+}
+
+export interface PositionQualificationCount {
+  positionCode: string;
+  positionName: string;
+  qualifiedCount: number;
+}
+
+export interface PositionQualificationCounts {
+  performanceMonth: string;
+  thresholdFen: bigint;
+  counts: PositionQualificationCount[];
 }
 
 /**
@@ -344,6 +357,36 @@ export class PositionsService implements OnModuleInit {
       thresholdFen,
       ranks,
       markets,
+    };
+  }
+
+  /**
+   * 某一自然月各档资格人数。允许尚未结束的当前月。
+   * 门槛用该月已经生效的 T，达标规则与职位分红相同。
+   * 不计算池金额，也不因为月份未结束而拒绝。
+   */
+  async qualificationCounts(performanceMonth: string): Promise<PositionQualificationCounts> {
+    if (!isShanghaiBizMonth(performanceMonth)) {
+      throw new BadRequestException('月份不正确');
+    }
+    const from = startOfBizMonth(performanceMonth);
+    const until = startOfBizMonth(nextBizMonth(performanceMonth));
+    const nodes = await this.performance.loadNodes();
+    const startup = await this.performance.startupPaidByUser(
+      nodes.map((node) => node.userId),
+      from,
+      until,
+    );
+    const thresholdFen = await this.settings.thresholdForMonth(performanceMonth);
+    const sets = this.qualifiedSets(nodes, startup, thresholdFen);
+    return {
+      performanceMonth,
+      thresholdFen,
+      counts: this.locked.positionDividendPools.map((tier, index) => ({
+        positionCode: tier.positionCode,
+        positionName: positionName(tier.positionCode),
+        qualifiedCount: sets[index]?.size ?? 0,
+      })),
     };
   }
 
