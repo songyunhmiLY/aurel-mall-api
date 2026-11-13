@@ -11,6 +11,7 @@ import { OpsTeamModule } from './modules/ops-team/ops-team.module';
 import { StudioModule } from './modules/studio/studio.module';
 import { CmsModule } from './modules/cms/cms.module';
 import { HealthModule } from './modules/health/health.module';
+import { NotificationsModule } from './modules/notifications/notifications.module';
 import { AdminModule } from './modules/admin/admin.module';
 import { OpsModule } from './modules/ops/ops.module';
 import { OrdersModule } from './modules/orders/orders.module';
@@ -42,6 +43,7 @@ import { WalletModule } from './modules/wallet/wallet.module';
     CofounderPayModule,
     StudioModule,
     OpsTeamModule,
+    NotificationsModule,
   ],
 })
 export class AppModule {}

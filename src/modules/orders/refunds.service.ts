@@ -8,6 +8,7 @@ import {
 } from '@nestjs/common';
 import type { Order, OrderRefund } from '@prisma/client';
 import { ClockService } from '../../common/clock/clock.service';
+import { enqueueNotify } from '../../common/notify/notify-buffer';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { WechatPayGateway, WechatRefundAlreadyAccepted } from '../payments/wechat-pay.gateway';
 import {
@@ -239,7 +240,7 @@ export class RefundsService {
         bizId: fresh.id.toString(),
         occurredAt: now,
       });
-      return tx.orderRefund.update({
+      const updated = await tx.orderRefund.update({
         where: { id: fresh.id },
         data: {
           status: REFUND_APPROVED,
@@ -255,6 +256,15 @@ export class RefundsService {
           updatedAt: now,
         },
       });
+      enqueueNotify({
+        type: 'refund_result',
+        userId: fresh.userId,
+        status: 'approved',
+        amountFen: BigInt(again.refundFen),
+        orderNo: freshOrder.orderNo,
+        occurredAt: now,
+      });
+      return updated;
     });
     return toView(updated);
   }
@@ -269,7 +279,8 @@ export class RefundsService {
       if (current.status !== REFUND_PENDING) {
         throw new ConflictException('退款申请已处理');
       }
-      return tx.orderRefund.update({
+      const order = await tx.order.findUnique({ where: { id: current.orderId } });
+      const updated = await tx.orderRefund.update({
         where: { id: current.id },
         data: {
           status: REFUND_REJECTED,
@@ -278,6 +289,15 @@ export class RefundsService {
           updatedAt: now,
         },
       });
+      enqueueNotify({
+        type: 'refund_result',
+        userId: current.userId,
+        status: 'rejected',
+        amountFen: 0n,
+        orderNo: order?.orderNo ?? current.orderId.toString(),
+        occurredAt: now,
+      });
+      return updated;
     });
     return toView(updated);
   }

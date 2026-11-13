@@ -3,6 +3,7 @@
 /// 营销经理门槛 T 的生效月份在 market_threshold_revisions。
 /// 本表仍可能留着旧键 marketing_manager_market_threshold，只作为首次迁移来源。
 /// 微信支付键：wechat_pay_mch_id、wechat_pay_api_certificate、wechat_pay_api_v3_key。
+/// 消息推送键：notify_delivery_mode、notify_sms_*、notify_evt_{event}_{enabled|wx_tpl|sms_tpl|page|slots}。
 model AdminSetting {
   id               BigInt   @id @default(autoincrement())
   settingKey       String   @unique(map: "admin_settings_setting_key_uq") @map("setting_key") @db.VarChar(64)
