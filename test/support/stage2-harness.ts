@@ -8,7 +8,10 @@ import {
 } from '../../src/modules/orders/order-paid.hook';
 import { OrdersService } from '../../src/modules/orders/orders.service';
 import type { WechatPayGateway } from '../../src/modules/payments/wechat-pay.gateway';
-import type { WechatPaySettingsService } from '../../src/modules/payments/wechat-pay-settings.service';
+import type {
+  WechatPayCredentials,
+  WechatPaySettingsService,
+} from '../../src/modules/payments/wechat-pay-settings.service';
 import { WechatPayService } from '../../src/modules/payments/wechat-pay.service';
 import { TreesService } from '../../src/modules/rewards/trees/trees.service';
 import { WalletService } from '../../src/modules/wallet/wallet.service';
@@ -36,12 +39,17 @@ export function buildStage2(unitPriceFen = 1000) {
   const trees = new TreesService();
   const hook = new RecordingHook();
   const settlement = new OrderPaymentSettler(wallet, trees, hook);
-  const settings = {
+  const paySettings: {
+    credentials: WechatPayCredentials | null;
+    readCredentials(): Promise<WechatPayCredentials | null>;
+    isConfigured(): Promise<boolean>;
+  } = {
+    credentials: null,
     async readCredentials() {
-      return null;
+      return this.credentials;
     },
     async isConfigured() {
-      return false;
+      return this.credentials !== null;
     },
   };
   const gateway = {
@@ -51,13 +59,24 @@ export function buildStage2(unitPriceFen = 1000) {
   const wechatPay = new WechatPayService(
     prisma,
     clock,
-    settings as unknown as WechatPaySettingsService,
+    paySettings as unknown as WechatPaySettingsService,
     gateway as unknown as WechatPayGateway,
     env,
     settlement,
   );
   const orders = new OrdersService(prisma, clock, wallet, trees, settlement, wechatPay, env.locked);
-  return { ...stage1, env, wallet, trees, hook, settlement, wechatPay, orders, gateway };
+  return {
+    ...stage1,
+    env,
+    wallet,
+    trees,
+    hook,
+    settlement,
+    wechatPay,
+    orders,
+    gateway,
+    paySettings,
+  };
 }
 
 export type Stage2 = ReturnType<typeof buildStage2>;

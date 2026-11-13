@@ -25,6 +25,7 @@ import { WechatPaySettingsService } from './wechat-pay-settings.service';
 import { assertPaymentStatus, nextPaymentStatus } from './wechat-pay-state';
 import { WECHAT_PAY_CHANNEL, activePaymentSlot } from './wechat-pay.constants';
 import { OrderPaymentSettler } from '../orders/order-payment.settler';
+import { IDENTITY_PROVIDERS } from '../users/identity.constants';
 
 const MYSQL_SIGNED_BIGINT_MAX = 9223372036854775807n;
 const ORDER_PENDING_PAYMENT = 'pending_payment';
@@ -33,6 +34,11 @@ const ORDER_SHIPPED = 'shipped';
 
 export interface CreateWechatPrepayInput {
   orderId: string;
+  /**
+   * 订单支付传入的当前用户。
+   * 正式下单时，缺的 appId / openid 用这个用户已有的 wechat_mini 身份补上，自带的必须和该身份一致。
+   */
+  userId?: bigint;
   appId?: string;
   openid?: string;
   description?: string;
@@ -74,6 +80,7 @@ interface ApplyTradeInput {
 /**
  * 微信支付下单与回调状态机。
  * 商户资料未配齐时走模拟成功或模拟失败，配齐后只接受验签回调。
+ * 订单支付会带上当前用户。正式下单缺的 appId、openid 取自该用户的 wechat_mini 身份。
  * 成功或失败后交给订单结算：扣已冻结的账户份额，或把冻结还回去。
  */
 @Injectable()
@@ -95,6 +102,9 @@ export class WechatPayService {
     const now = await this.clock.now();
     const order = await this.prisma.order.findUnique({ where: { id: orderId } });
     if (!order) {
+      throw new NotFoundException('订单不存在');
+    }
+    if (input.userId !== undefined && order.userId !== input.userId) {
       throw new NotFoundException('订单不存在');
     }
     if (order.status === ORDER_PAID) {
@@ -126,11 +136,11 @@ export class WechatPayService {
         paySign: null,
       };
     }
-    const appId = input.appId?.trim() ?? '';
-    const openid = input.openid?.trim() ?? '';
-    if (!appId || !openid) {
-      throw new BadRequestException('微信支付下单需要 appId 和 openid');
-    }
+    const payer =
+      input.userId === undefined
+        ? requireExplicitPayer(input)
+        : await this.payerForUser(input.userId, input);
+    const { appId, openid } = payer;
     const notifyUrl = this.env.wechatPayNotifyUrl;
     if (!notifyUrl) {
       throw new BadRequestException('未配置 WECHAT_PAY_NOTIFY_URL，无法向微信支付下单');
@@ -179,6 +189,40 @@ export class WechatPayService {
       signType: 'RSA',
       paySign,
     };
+  }
+
+  /**
+   * 正式 JSAPI 下单的付款人。
+   * openid 是 wechat_mini 身份上的 identifier，appId 是登录换这个 openid 时用的小程序 AppId。
+   * 客户端没传的字段用这组身份补上；传了就必须一致，避免拿别人的 openid 下单。
+   */
+  private async payerForUser(
+    userId: bigint,
+    input: CreateWechatPrepayInput,
+  ): Promise<{ appId: string; openid: string }> {
+    const identity = await this.prisma.userIdentity.findFirst({
+      where: { userId, provider: IDENTITY_PROVIDERS.wechatMini },
+      orderBy: { id: 'asc' },
+    });
+    const sessionOpenid = identity?.identifier.trim() ?? '';
+    if (!sessionOpenid) {
+      throw new BadRequestException('当前账号没有微信小程序身份，无法微信支付下单');
+    }
+    const sessionAppId = this.env.wechatMiniAppId?.trim() ?? '';
+    const suppliedAppId = input.appId?.trim() ?? '';
+    const suppliedOpenid = input.openid?.trim() ?? '';
+    if (
+      (suppliedAppId !== '' && suppliedAppId !== sessionAppId) ||
+      (suppliedOpenid !== '' && suppliedOpenid !== sessionOpenid)
+    ) {
+      throw new BadRequestException('appId 或 openid 与当前微信身份不一致');
+    }
+    const appId = suppliedAppId || sessionAppId;
+    const openid = suppliedOpenid || sessionOpenid;
+    if (!appId || !openid) {
+      throw new BadRequestException('微信支付下单需要 appId 和 openid');
+    }
+    return { appId, openid };
   }
 
   async simulateSuccess(payNo: string): Promise<WechatPaymentResult> {
@@ -483,6 +527,15 @@ function resolveWechatChargeFen(order: { payAmountFen: number; wechatFen?: numbe
     return order.wechatFen;
   }
   return order.payAmountFen;
+}
+
+function requireExplicitPayer(input: CreateWechatPrepayInput): { appId: string; openid: string } {
+  const appId = input.appId?.trim() ?? '';
+  const openid = input.openid?.trim() ?? '';
+  if (!appId || !openid) {
+    throw new BadRequestException('微信支付下单需要 appId 和 openid');
+  }
+  return { appId, openid };
 }
 
 function parseOrderId(value: string): bigint {

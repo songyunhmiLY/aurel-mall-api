@@ -258,6 +258,7 @@ export class OrdersService {
     const current = await this.getForUser(userId, orderId);
     const wechat = await this.wechat.createPrepay({
       orderId: orderId.toString(),
+      userId,
       appId: input.appId,
       openid: input.openid,
       description: `订单${current.orderNo}`,

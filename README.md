@@ -371,7 +371,9 @@ T **不是**锁定项。环境变量 `MARKETING_MANAGER_MARKET_THRESHOLD_DEFAULT
 
 ### 支付顺序
 
-`POST /api/v1/orders/:id/pay` 的 body 可空。需要微信支付且商户资料已配齐时，带 `appId` 和 `openid`。`data` 是 `{ "order", "wechat" }`。账户够付时 `wechat` 为 `null`，订单直接变成 `paid`。否则 `wechat` 是下面的预下单结果，订单仍是 `pending_payment`。
+`POST /api/v1/orders/:id/pay` 的 body 可空。`data` 是 `{ "order", "wechat" }`。账户够付时 `wechat` 为 `null`，订单直接变成 `paid`，不需要 `appId` 和 `openid`。否则 `wechat` 是预下单结果，订单仍是 `pending_payment`。
+
+商户资料未配齐时，预下单是模拟结果，同样不需要这两个字段。已配齐时，客户端可以带 `appId` 和 `openid`；省略的字段用当前登录用户已有的 `wechat_mini` 身份补上。openid 是小程序登录时记下的身份标识，appId 是环境变量 `WECHAT_MINI_APP_ID`（登录向微信换 openid 用的就是这个小程序）。客户端若自行传入，必须和这个身份一致，否则返回 400「appId 或 openid 与当前微信身份不一致」。没有 `wechat_mini` 身份时（例如预览登录）返回 400「当前账号没有微信小程序身份，无法微信支付下单」，不会编造 openid。
 
 来源顺序不能由调用方调整，也不能跳过。
 
@@ -424,7 +426,7 @@ T **不是**锁定项。环境变量 `MARKETING_MANAGER_MARKET_THRESHOLD_DEFAULT
 
 - `POST /api/v1/payments/wechat/prepay`，body：`{ "orderId": "1", "appId": "wx...", "openid": "..." }`
 - 未配齐商户资料时返回 `mode: "sandbox"`，不调用微信。`POST /api/v1/payments/wechat/sandbox/succeed`，body：`{ "payNo": "..." }`，把该支付单标为成功。订单若仍待支付，就扣掉已冻结的账户份额、扣库存并完成订单。`POST /api/v1/payments/wechat/sandbox/fail` 用同样的 body 模拟失败，释放冻结，不完成订单。
-- 已配齐时必须带 `appId`、`openid`，以及环境变量 `WECHAT_PAY_NOTIFY_URL`。接口向微信 JSAPI 下单，返回 `mode: "live"` 和小程序 `requestPayment` 需要的签名字段。
+- 已配齐时还需要环境变量 `WECHAT_PAY_NOTIFY_URL`。`POST /api/v1/orders/:id/pay` 可以省略 `appId` 和 `openid`，省略时使用当前会话的 `wechat_mini` 身份；没有该身份则不能正式下单。直接调用 `POST /api/v1/payments/wechat/prepay` 时仍要在 body 里带上 `appId` 和 `openid`。接口向微信 JSAPI 下单，返回 `mode: "live"` 和小程序 `requestPayment` 需要的签名字段。
 - 回调是 `POST /api/v1/payments/wechat/notify`。验签和解密使用已保存的商户资料和微信支付平台证书。成功且金额、商户号一致时，支付单变为 `success`，并完成仍待支付的订单。`PAYERROR` / `CLOSED` / `REVOKED` 把仍在待支付的支付单标为 `failed`，并释放冻结。`success` 之后不再改回失败；若之前已是 `failed` 又收到 `SUCCESS`，改为成功。订单已经关闭时，这笔成功不会把订单改成已支付。重复通知不会重复扣款或重复入座。
 - 商户资料已配齐时，模拟成功和模拟失败都返回 403。
 
