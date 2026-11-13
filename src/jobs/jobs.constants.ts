@@ -1,1 +1,1 @@
-export const PLACEHOLDER_QUEUE = 'placeholder';
+export const DUE_QUEUE = 'due-jobs';

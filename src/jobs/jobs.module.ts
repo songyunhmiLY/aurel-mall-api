@@ -3,8 +3,12 @@ import { Module } from '@nestjs/common';
 import type { AppEnv } from '../config/app-env';
 import { toBullMqConnection } from '../config/redis-url';
 import { APP_ENV } from '../config/tokens';
-import { PLACEHOLDER_QUEUE } from './jobs.constants';
-import { PlaceholderProcessor } from './placeholder.processor';
+import { FilingModule } from '../modules/rewards/filing/filing.module';
+import { PositionsModule } from '../modules/rewards/positions/positions.module';
+import { DueJobProcessor } from './due-job.processor';
+import { DueJobRunner } from './due-job.runner';
+import { DueJobScheduler } from './due-job.scheduler';
+import { DUE_QUEUE } from './jobs.constants';
 
 @Module({
   imports: [
@@ -14,8 +18,10 @@ import { PlaceholderProcessor } from './placeholder.processor';
         connection: toBullMqConnection(env.redisUrl),
       }),
     }),
-    BullModule.registerQueue({ name: PLACEHOLDER_QUEUE }),
+    BullModule.registerQueue({ name: DUE_QUEUE }),
+    FilingModule,
+    PositionsModule,
   ],
-  providers: [PlaceholderProcessor],
+  providers: [DueJobRunner, DueJobProcessor, DueJobScheduler],
 })
 export class JobsModule {}

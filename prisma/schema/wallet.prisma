@@ -46,6 +46,7 @@ model WalletLedgerEntry {
   occurredAt      DateTime @map("occurred_at") @db.DateTime(3)
   createdAt       DateTime @map("created_at") @db.DateTime(3)
 
+  @@unique([userId, walletType, direction, bizType, bizId], map: "wallet_ledger_credit_biz_uq")
   @@index([accountId, occurredAt], map: "wallet_ledger_account_occurred_idx")
   @@index([userId, occurredAt], map: "wallet_ledger_user_occurred_idx")
   @@index([bizType, bizId], map: "wallet_ledger_biz_idx")

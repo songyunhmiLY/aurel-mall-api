@@ -244,7 +244,7 @@ erDiagram
 
 ## 6. 邀请树、市场树、报单、奖励、职位
 
-两棵树分开存。启动时只为官方根账户各写一行：`parent_user_id` 为空，`depth` 为 0。其他用户注册后只进邀请树；创业专区支付成功后，从邀请人的席位按每层最多 3 个下级入座。有市场席位才是会员，并写回 `users.member` / `users.seated`。职位分红**份额**不在 `positions` 表里，而在环境变量 `POSITION_DIVIDEND_SHARE_TIERS`，用 `positions.code` 做逻辑对应。
+两棵树分开存。启动时只为官方根账户各写一行：`parent_user_id` 为空，`depth` 为 0。其他用户注册后只进邀请树；创业专区支付成功后，从邀请人的席位按每层最多 3 个下级入座。有市场席位才是会员，并写回 `users.member` / `users.seated`。职位池比例在环境变量 `POSITION_DIVIDEND_POOL_BPS`，用 `positions.code` 对应。任职按自然月计算，不写永久 `user_positions`。报单资格在 `startup_sub_orders`，公排在 `filings.sequence`，幸运返还在 `filing_settlements`。门槛 T 的生效月份在 `market_threshold_revisions`。职位分红周期、移出自动发放的会员和自动/手工发放记录分别在 `position_dividend_periods`、`position_dividend_exclusions`、`position_dividend_records`。
 
 ```mermaid
 erDiagram

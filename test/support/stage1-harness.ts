@@ -66,23 +66,37 @@ export function stage1Env(overrides: Partial<AppEnv> = {}): AppEnv {
     wechatPayNotifyUrl: null,
     wechatMiniAppId: 'wx-test-app',
     wechatMiniAppSecret: 'test-mini-secret',
-    marketingManagerMarketThresholdDefault: '10000',
+    marketingManagerMarketThresholdDefault: '2000000',
     locked: lockedConfig(UNIT_PRICE_FEN),
     ...overrides,
   };
 }
 
 export function lockedConfig(startupZoneUnitPriceFen: number): LockedRuntimeConfig {
-  const award = Object.freeze({ ratioBps: 0, withdrawableBps: 0, pointsBps: 10_000 });
   return Object.freeze({
     startupZoneUnitPriceFen,
     filingWithdrawalRatioBps: 0,
-    startupSalesAward: award,
-    startupPointAward: award,
-    mallSalesAward: award,
-    mallPointAward: award,
-    positionDividendShareTiers: Object.freeze([
-      Object.freeze({ positionCode: 'leader', shares: 1 }),
+    filingDailyCheckTime: '00:01',
+    startupSalesRatioBps: 0,
+    startupPointRatioBps: 0,
+    startupAwardSplit: Object.freeze({
+      withdrawableBps: 8500,
+      pointsBps: 500,
+      consumptionBps: 1000,
+    }),
+    mallSalesRatioBps: 0,
+    mallPointRatioBps: 0,
+    mallAwardSplit: Object.freeze({
+      withdrawableBps: 8500,
+      pointsBps: 1000,
+      consumptionBps: 500,
+    }),
+    positionDividendPools: Object.freeze([
+      Object.freeze({ positionCode: 'marketing_manager', poolBps: 800 }),
+      Object.freeze({ positionCode: 'senior_manager', poolBps: 600 }),
+      Object.freeze({ positionCode: 'director', poolBps: 500 }),
+      Object.freeze({ positionCode: 'senior_director', poolBps: 400 }),
+      Object.freeze({ positionCode: 'chief', poolBps: 300 }),
     ]),
     redPacketDailyAccrualBps: 0,
     redPacketRoundPayThresholdFen: 0,

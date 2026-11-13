@@ -11,6 +11,8 @@ import { PaymentPasswordController } from './payment-password.controller';
 import { PaymentPasswordService } from './payment-password.service';
 import { TransferController } from './transfer.controller';
 import { TransferService } from './transfer.service';
+import { WalletAdminController } from './wallet-admin.controller';
+import { WalletAdminService } from './wallet-admin.service';
 import { WalletController } from './wallet.controller';
 import { WalletService } from './wallet.service';
 import { WithdrawalAdminController } from './withdrawal-admin.controller';
@@ -27,9 +29,11 @@ import { WithdrawalService } from './withdrawal.service';
     WithdrawalController,
     WithdrawalAdminController,
     DisplayNameAdminController,
+    WalletAdminController,
   ],
   providers: [
     WalletService,
+    WalletAdminService,
     CashLedgerService,
     PaymentPasswordService,
     BankAccountService,

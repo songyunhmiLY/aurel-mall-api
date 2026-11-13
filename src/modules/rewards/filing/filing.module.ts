@@ -1,8 +1,15 @@
 import { Module } from '@nestjs/common';
+import { AuthModule } from '../../../common/auth/auth.module';
+import { ClockModule } from '../../../common/clock/clock.module';
+import { AwardCreditModule } from '../award-credit.module';
+import { FilingAdminController } from './filing-admin.controller';
+import { FilingQueryService } from './filing-query.service';
 import { FilingService } from './filing.service';
 
 @Module({
-  providers: [FilingService],
-  exports: [FilingService],
+  imports: [AuthModule, ClockModule, AwardCreditModule],
+  controllers: [FilingAdminController],
+  providers: [FilingService, FilingQueryService],
+  exports: [FilingService, FilingQueryService],
 })
 export class FilingModule {}

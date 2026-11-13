@@ -1,6 +1,6 @@
 # 奥瑞尔经销商城 API
 
-经销商城后端。当前包含工程骨架、业务时钟、管理员登录、小程序登录、实名、收货地址、商品上下架、订单支付、三个钱包账户、消费账户划转、提现审核、商城退款审核、创业专区支付成功后的入座，以及微信支付下单与回调。购物车、奖励结算和消息推送还没做。
+经销商城后端。当前包含工程骨架、业务时钟、管理员登录、小程序登录、实名、收货地址、商品上下架、订单支付、三个钱包账户、消费账户划转、提现审核、商城退款审核、创业专区支付成功后的入座、报单与全网公排、创业专区和商城奖励、月度职位分红、创业团队页，以及微信支付下单与回调。购物车、福利专场、联合创始人、工作室、运营团队和消息推送还没做。
 
 同级仓库：
 
@@ -105,9 +105,9 @@ src/
     payments/             # 微信支付下单、回调、商户配置
     wallet/               # 积分、可提现、消费账户、划转、提现
     cms/                  # Banner / 文章 / 滚动条占位
-    rewards/              # 奖励，以及 trees、filing、positions、red-packet
-    settings/             # 仅营销经理门槛 T
-  jobs/                   # BullMQ 占位队列
+    rewards/              # 报单、奖励、市场业绩、职位分红、创业团队
+    settings/             # 营销经理门槛 T（下月生效）
+  jobs/                   # 按业务时钟跑每日报单检查和职位分红
 prisma/schema/            # 多文件 schema，无外键
 docs/er.md                # 逻辑 ER 图
 ```
@@ -121,7 +121,7 @@ docs/er.md                # 逻辑 ER 图
 - 失败：HTTP 状态与 `code` 相同，`message` 为原因，`data` 一般为 `null`
 - 健康检查：`GET /api/v1/health`
 
-对外业务路由包括健康检查、时钟、管理员登录、小程序登录、实名、收货地址、商品、钱包余额和流水、消费账户划转、提现、商城退款、订单支付、发货，以及微信支付。购物车和奖励结算还没有接口。JSON 里的 bigint 编号和金额里的 bigint 都是十进制字符串。
+对外业务路由包括健康检查、时钟、管理员登录、小程序登录、实名、收货地址、商品、钱包余额和流水、消费账户划转、提现、商城退款、订单支付、发货、微信支付、创业团队，以及管理端的邀请关系、市场树、报单、奖励、职位分红和会员钱包查询。购物车、福利专场和联合创始人分红还没有接口。会员端没有幸运返还、奖励明细、我的职位或邀请关系列表，这些金额出现在可提现分类里，关系和管理明细只给管理端。JSON 里的 bigint 编号和金额里的 bigint 都是十进制字符串。
 
 ## 认证
 
@@ -285,31 +285,40 @@ curl -X DELETE http://127.0.0.1:3000/api/v1/internal/clock/override
 
 这些值放在 `docker-compose.yml` 和 `.env.example` 里，进程启动时读入并冻结。没有管理端修改接口，改了必须重启。不要写进 `admin_settings`。
 
-| 含义                                   | 变量                                                                                              | 示例默认                                |
-| -------------------------------------- | ------------------------------------------------------------------------------------------------- | --------------------------------------- |
-| 创业专区单价 N                         | `STARTUP_ZONE_UNIT_PRICE_FEN`                                                                     | `100000`（1000.00 元，示例）            |
-| 报单/结算可提现比例                    | `FILING_WITHDRAWAL_RATIO_BPS`                                                                     | `8000`（80%，示例）                     |
-| 创业专区销售奖比例 R 及钱包拆分        | `STARTUP_SALES_AWARD_RATIO_BPS`、`_WITHDRAWABLE_BPS`、`_POINTS_BPS`                               | `1000` / `7000` / `3000`（示例）        |
-| 创业专区积分奖比例 P 及拆分            | `STARTUP_POINT_AWARD_*`                                                                           | `500` / `0` / `10000`（示例）           |
-| 商城销售奖比例 S 及拆分                | `MALL_SALES_AWARD_*`                                                                              | `800` / `7000` / `3000`（示例）         |
-| 商城积分奖比例 Q 及拆分                | `MALL_POINT_AWARD_*`                                                                              | `300` / `0` / `10000`（示例）           |
-| 职位分红份额档位                       | `POSITION_DIVIDEND_SHARE_TIERS`                                                                   | `leader:1,manager:2,director:3`（示例） |
-| 每日红包计提占当日创业专区销售额       | `RED_PACKET_DAILY_ACCRUAL_BPS`                                                                    | `100`（1%，示例）                       |
-| 红包轮次实付门槛 K                     | `RED_PACKET_ROUND_PAY_THRESHOLD_FEN`                                                              | `500000`（需求示例 5000 元）            |
-| 每轮领取上限 C                         | `RED_PACKET_ROUND_CLAIM_CAP_FEN`                                                                  | `800000`（需求示例 8000 元）            |
-| 联合创始人 / 工作室 / 运营团队分红比例 | `COFOUNDER_DIVIDEND_RATIO_BPS`、`STUDIO_DIVIDEND_RATIO_BPS`、`OPERATIONS_TEAM_DIVIDEND_RATIO_BPS` | `3000` / `2000` / `1000`（示例）        |
-| 提现手续费                             | `WITHDRAWAL_FEE_FEN`                                                                              | `0`（示例，正式金额未确认）             |
+| 含义 | 变量 | 示例默认 |
+| --- | --- | --- |
+| 创业专区单价 N | `STARTUP_ZONE_UNIT_PRICE_FEN` | `100000`（1000.00 元） |
+| 报单结算可提现比例 | `FILING_WITHDRAWAL_RATIO_BPS` | `2000`（20%） |
+| 每日报单检查时间 | `FILING_DAILY_CHECK_TIME` | `00:01`（Asia/Shanghai，HH:mm） |
+| 创业专区销售奖比例 R | `STARTUP_SALES_AWARD_RATIO_BPS` | `500`（5%） |
+| 创业专区见点奖比例 P | `STARTUP_POINT_AWARD_RATIO_BPS` | `200`（2%） |
+| 创业奖钱包拆分 | `STARTUP_AWARD_WITHDRAWABLE_BPS`、`_POINTS_BPS`、`_CONSUMPTION_BPS` | `8500` / `500` / `1000` |
+| 商城销售奖比例 S | `MALL_SALES_AWARD_RATIO_BPS` | `500`（5%） |
+| 商城见点奖比例 Q | `MALL_POINT_AWARD_RATIO_BPS` | `200`（2%） |
+| 商城奖和职位分红钱包拆分 | `MALL_AWARD_WITHDRAWABLE_BPS`、`_POINTS_BPS`、`_CONSUMPTION_BPS` | `8500` / `1000` / `500` |
+| 职位分红池，从低到高 | `POSITION_DIVIDEND_POOL_BPS` | `marketing_manager:800,senior_manager:600,director:500,senior_director:400,chief:300` |
+| 每日红包计提占当日创业专区销售额 | `RED_PACKET_DAILY_ACCRUAL_BPS` | `100`（1%，占位） |
+| 红包轮次实付门槛 K | `RED_PACKET_ROUND_PAY_THRESHOLD_FEN` | `500000`（需求示例 5000 元） |
+| 每轮领取上限 C | `RED_PACKET_ROUND_CLAIM_CAP_FEN` | `800000`（需求示例 8000 元） |
+| 联合创始人 / 工作室 / 运营团队分红比例 | `COFOUNDER_DIVIDEND_RATIO_BPS`、`STUDIO_DIVIDEND_RATIO_BPS`、`OPERATIONS_TEAM_DIVIDEND_RATIO_BPS` | `3000` / `2000` / `1000`（占位，本阶段不结算） |
+| 提现手续费 | `WITHDRAWAL_FEE_FEN` | `0`（示例，正式金额未确认） |
 
-每组钱包拆分必须合计 `10000`，目标是可提现余额 `withdrawable` 和积分 `points`。对不上时进程拒绝启动。除 K、C 外，上表数字都是占位，不是已确认的产品规则。职位编码要以后和 `positions.code` 对上，目前不预置职位数据。
+两组钱包拆分都是可提现、积分、消费三项，必须合计 `10000`。对不上，或每日检查时间不是 `HH:mm` 时，进程拒绝启动。创业专区的销售奖和见点奖共用创业奖拆分。商城销售奖、商城见点奖和职位分红共用商城拆分。职位池按配置顺序从低到高：第一档是营销经理，不与同时达到更高职位的人叠加；更高档包含同时达到更高职位的人。各档万分比不必合计 `10000`，没有合格会员的那一档留在系统里。
+
+`FILING_DAILY_CHECK_TIME` 只在进程启动时读入，没有管理端修改接口，也不写入 `admin_settings`。红包比例、联合创始人比例和提现手续费仍是占位，本阶段不按它们结算。启动时会按职位池编码写入 `positions`。已知编码的显示名是营销经理、高级经理、营销总监、高级总监、首席。启动时如果库里已经有旧显示名，会改成这五个。换成其他编码时显示名就是编码本身。
 
 ## 营销经理市场门槛 T
 
-T **不是**锁定项。环境变量 `MARKETING_MANAGER_MARKET_THRESHOLD_DEFAULT` 只在 `admin_settings` 还没有键 `marketing_manager_market_threshold` 时写入一次。之后以数据库的值为准，重启不会覆盖。单位尚未确认。
+T **不是**锁定项。单位是分，比较的是市场里创业专区已支付订单的应付金额（含运费）。环境变量 `MARKETING_MANAGER_MARKET_THRESHOLD_DEFAULT` 只在还没有任何生效月份时，作为当前上海自然月的首次值写入 `market_threshold_revisions`。若库里还留着旧键 `marketing_manager_market_threshold`，首次迁移用那个字符串。之后以修订记录为准，重启不会覆盖。
+
+管理端修改只写入**下一个**自然月。当月资格仍用改之前的 T。某月采用 `effectiveMonth` 小于等于该月的最新一行。
 
 需要管理员令牌：
 
 - `GET /api/v1/admin/settings/marketing-manager-market-threshold`
-- `PUT /api/v1/admin/settings/marketing-manager-market-threshold`，body：`{ "value": "10000" }`
+- `PUT /api/v1/admin/settings/marketing-manager-market-threshold`，body：`{ "value": "2000000" }`
+
+`data` 为 `{ "month", "thresholdFen", "nextMonth", "nextThresholdFen" }`。金额是十进制字符串。示例 `2000000` 表示 20000.00 元。
 
 ## 钱包
 
@@ -463,7 +472,7 @@ T **不是**锁定项。环境变量 `MARKETING_MANAGER_MARKET_THRESHOLD_DEFAULT
 
 取消和超时都是 `POST`，没有 body。两者都只作用于仍待支付的订单：释放冻结，把未完成的微信支付单标为失败，订单改为 `closed`。本阶段没有按固定时长自动关单。失败后的订单如果仍是 `pending_payment`，可以再次调用支付；会按当时的可用余额重新计算拆分。
 
-支付成功后留有内部钩子，供以后的报单、奖励和消息使用。本阶段不写报单，也不发奖励。
+支付成功、扣库存并完成入座之后，仍在同一事务里结算报单资格和奖励。创业专区生成报单子单，并在此人当天还没报过时立刻报其中一单；同时按应付金额发创业专区奖励。商城按订单 PV 发商城奖励。重复回调不会重复报单或重复入账。消息推送仍然没做。
 
 ### 发货
 
@@ -491,6 +500,113 @@ T **不是**锁定项。环境变量 `MARKETING_MANAGER_MARKET_THRESHOLD_DEFAULT
 4. 再满就用同样的规则继续往下，不设层数上限。新席位沿上级走，一定能走回这位邀请人。
 
 接口文案不使用「市场树」或「节点」。
+
+## 报单和全网公排
+
+报单是内部词。会员没有报单接口，系统自动报。只有创业专区已支付、且单价等于当时锁定单价 N 的每一件数量，产生一条报单资格。运费不产生资格。每个用户每个 Asia/Shanghai 自然日最多完成一笔报单。
+
+两条路径都会先确认此人当天还没报过：
+
+1. 立即报。同一天的创业专区支付成功后，若当天还没报过，立刻报本次新子单里 id 最小的一笔，不等到凌晨。当天已经报过，则这些新子单留到以后的每日检查。
+2. 每日检查。时刻是锁定配置 `FILING_DAILY_CHECK_TIME`，默认 `00:01`，时区 Asia/Shanghai。每个用户在未报过的子单里取下单时间最早的一笔，时间相同则取子单 id 较小的一笔。然后按同样的顺序逐笔报入公排。服务在当天这个时刻之后补跑；若已经跑过更晚的日期，时钟回拨不会把已完成的日期再跑一遍。进程第一次启动不会把历史每一天都补报，只从当天该跑的检查开始，之后漏掉的自然日会按顺序补上。
+
+每完成一笔就进入全网公排，序号从 1 全局递增。序号为 5 的倍数时，立刻给序号 k（第 k 笔公排，不是按注册或邀请重排）入账，然后继续。积分账户增加当时的 N，可提现账户增加 `N × FILING_WITHDRAWAL_RATIO_BPS / 10000`（向下取整）。其他序号这一轮没有这笔返还。可提现入账来源是 `filing_settlement`，显示分类是幸运返还。
+
+需要管理员令牌：
+
+- `GET /api/v1/admin/filings?userId=&bizDate=&sequence=&page=&pageSize=`
+- `GET /api/v1/admin/filings/:id`
+- `GET /api/v1/admin/filing-settlements?userId=&page=&pageSize=`
+
+报单字段：`id`、`filingNo`、`userId`、`nickname`、`orderId`、`subOrderId`、`sequence`、`bizDate`、`status`（`filed` 或 `settled`）、`amountFen`、`filedAt`、`settledAt`、`settlement`、`triggeredSettlement`。`settlement` 是这一笔作为第 k 单领到的幸运返还。`triggeredSettlement` 只在序号为 5 的倍数时出现，表示这笔完成时发给序号 k 的返还。返还字段有 `triggerSequence`、`beneficiaryFilingId`、`beneficiaryUserId`、`pointsFen`、`withdrawableFen`、`unitPriceFen`、`withdrawalRatioBps`、`settledAt`。
+
+## 创业专区奖励和商城奖励
+
+两笔都在支付成功时计算，和这单有没有报过无关。金额用整数分，比例向下取整。三个账户拆分后的余数加给比例最大的一项（相同则先可提现，再积分，再消费），三项之和等于原奖励额。为 0 的账户不写流水。
+
+创业专区按商品金额计算，也就是 N × 件数，多件合计，不含运费。拆分用创业奖配置：
+
+- 销售奖只给邀请关系上的直接邀请人，金额 = 应付 × R。来源 `startup_sales`。
+- 见点奖给市场上的上级，不含购买人本人。每一层单独拿应付 × P。第 1 到 4 层没有额外条件。第 5 到 8 层要求收款人已有至少 3 笔创业子单、合计至少 3N，并且邀请关系下至少 3 名已入座的直接会员。第 9 到 12 层把 3 换成 5。某一层不够就跳过，继续往上。第 13 层及以上不发。来源 `startup_points`。
+
+商城按订单 PV 计算（`pvFen`，1 PV = 1 元 = 100 分），只走邀请关系，不走市场，拆分用商城配置，没有额外层门槛：
+
+- 第 1 层（直接邀请人）拿 PV × S，来源 `mall_sales`，不再拿见点奖。
+- 第 2 到 15 层各自拿 PV × Q，来源 `mall_points`。邀请链结束就停。第 16 层及以上不发。
+
+需要管理员令牌：
+
+- `GET /api/v1/admin/awards?userId=&orderId=&rewardType=&layer=&page=&pageSize=`
+
+`rewardType` 只能是 `startup_sales`、`startup_points`、`mall_sales`、`mall_points`。销售奖的 `layer` 记为 1，表示直接邀请人。见点奖的 `layer` 是往上数的层。返回 `id`、`userId`、`nickname`、`rewardType`、`orderId`、`layer`、`amountFen`、`occurredAt`，以及 `wallets`（`walletType`、`amountFen`、`sourceCode`）。可提现那一条才有 `sourceCode`。
+
+## 月度职位和次月业绩奖
+
+职位按 Asia/Shanghai 自然月计算，不是永久头衔。一个市场是一名直接下级加上该下级下面的所有人，最多 3 个。资格不用邀请关系。
+
+营销经理：至少 2 个市场在该月的创业专区已付总额达到当月 T。更高职位：至少 2 个市场里，各自至少有 2 名该月达到上一档的会员，人可以在该市场的任意深度。
+
+次月分配上月全平台商城 PV。示例池是营销经理 8%、高级经理 6%、营销总监 5%、高级总监 4%、首席 3%，实际比例读 `POSITION_DIVIDEND_POOL_BPS`。8% 这一档不含同时达到更高职位的人。更高档包含，即使此人还达到更上面的职位。池子金额 = 上月商城 PV × 该档万分比，再在合格会员之间整除。除不尽的余数留在系统。没有合格会员的档位也留在系统，不并入其他档，也不留到下月。入账来源 `position_dividend`，显示分类业绩奖，拆分用商城配置。
+
+发放日在业绩月的次月，默认 15 日。只能在本期自动发放之前，改到一个还没到来、并且仍在该次月里的日期。发放日前可以看上月报表，也可以把指定会员移出自动发放。不能整期取消。被移出的人，原来算好的份额不重新分给其他人。只有被移出的人可以手工改额发放，必须填写备注，并同时留下原额和实发额，拆分仍用商城配置。自动和手工记录在同一张表里查询。
+
+退款不减少已结束月份的商城 PV，创业专区订单也不能退款，所以月份结束后重算结果不变。
+
+需要管理员令牌：
+
+- `GET /api/v1/admin/position-dividends?month=YYYY-MM`，不传 `month` 时是上一个已结束的自然月。当月还没结束不能查。
+- `GET /api/v1/admin/position-dividends/qualifications/:userId?month=`
+- `PUT /api/v1/admin/position-dividends/:month/payout-date`，body：`{ "payoutDate": "2026-11-20" }`
+- `POST /api/v1/admin/position-dividends/:month/exclusions`，body：`{ "userId": "2" }`
+- `POST /api/v1/admin/position-dividends/:month/manual-payments`，body：`{ "userId": "2", "positionCode": "marketing_manager", "actualAmountFen": "1000", "remark": "线下调整" }`
+- `GET /api/v1/admin/position-dividends/:month/records?page=&pageSize=`
+
+报表 `data` 含 `performanceMonth`、`payoutMonth`、`payoutDate`、`status`（`open` 或 `paid`）、`thresholdFen`、`mallPvFen`、`pools`。每个池有 `positionCode`、`positionName`、`poolBps`、`exclusive`、`poolFen`、`eligibleCount`、`shareFen`、`members`。成员有 `userId`、`nickname`、`removed`、`originalAmountFen`、`payment`。`payment` 为 `null`，或 `{ "mode": "auto" | "manual", "actualAmountFen", "remark", "paidAt" }`。
+
+资格接口的 `ranks` 每一档有 `qualified` 和 `inPool`。`qualified` 表示达到该档条件。营销经理的 `inPool` 在同时达到更高档时为 false。`markets` 是直接市场和该月业绩。
+
+发放记录有 `id`、`userId`、`positionCode`、`positionName`、`mode`、`originalAmountFen`、`actualAmountFen`、`remark`、`paidAt`。
+
+业绩月尚未结束、发放日不在次月、或发放日不是未来日期，返回 400。本期已自动发放后再改日期返回 409。手工发给没被移出的会员返回 400。同一职位重复手工发放返回 409。
+
+## 创业团队
+
+需要用户令牌：
+
+- `GET /api/v1/me/team`
+
+`data` 为 `{ "marketCount", "totalPerformanceFen", "markets" }`。没有直接市场时 `marketCount` 为 0，`totalPerformanceFen` 为 `"0"`，`markets` 为 `[]`。
+
+每个市场有 `name`（直接下级的昵称，空昵称显示「会员」）、`monthPerformanceFen`、`recent7DaysPerformanceFen`、`todayPerformanceFen`。顺序是入座时间早的在前，相同则编号小的在前。
+
+业绩口径：该下级及其下面所有人的创业专区已支付订单应付金额之和，含运费，单位分。不含查看者自己的订单。本月、今天按 Asia/Shanghai 的自然月和自然日，截止到下一天或下一个月的起点。近 7 日是含今天在内的 7 个自然日，不是滚动 168 小时。官方文档没有另定口径。接口字段和文案不使用「市场树」或「节点」。
+
+## 管理端关系和钱包
+
+小程序没有这些入口。管理端可以查看。这里可以使用「市场树」。
+
+需要管理员令牌：
+
+- `GET /api/v1/admin/users/:id/invite`
+- `GET /api/v1/admin/users/:id/invite/ancestors`
+- `GET /api/v1/admin/users/:id/invite/descendants?depth=`
+- `GET /api/v1/admin/users/:id/market-tree`
+- `GET /api/v1/admin/users/:id/wallets`
+- `GET /api/v1/admin/users/:id/wallet-holds?status=&page=&pageSize=`
+- `GET /api/v1/admin/users/:id/wallets/:walletType/ledger?page=&pageSize=`
+- `GET /api/v1/admin/transfers?payerId=&payeeId=&page=&pageSize=`
+
+邀请接口的 `data` 含 `user`、`inviter`、`directInvitees`。人和邀请人有 `userId`、`nickname`、`inviteCode`、`member`。直接邀请人另有 `joinedAt`。`ancestors.items` 从直接上级走到根。`descendants` 的 `depth` 默认 5，最大 20，返回 `{ "depth", "items" }`，每一项还有 `parentUserId` 和相对层数。
+
+市场树接口含 `seated`、`depth`、`placedAt`、`parent`、`markets`。每个市场有 `userId`、`nickname`、`placedAt`、`memberCount`、`members`。成员含该市场本人和下面的人，字段是 `userId`、`nickname`、`depth`、`placedAt`。还没入座时 `seated` 为 false，`markets` 为空。
+
+钱包余额形状和会员自己的 `GET /me/wallets` 相同。冻结记录有 `id`、`orderId`、`walletType`、`amountFen`、`status`、`createdAt`、`updatedAt`。流水形状和会员流水相同。划转记录有 `id`、`payerUserId`、`payerNickname`、`payeeUserId`、`payeeNickname`、`amountFen`、`createdAt`。
+
+用户不存在返回 404「用户不存在」。`walletType` 不是 `points`、`withdrawable`、`consumption` 时返回 400。
+
+## 定时任务
+
+BullMQ 队列 `due-jobs` 大约每 30 秒触发一次，进程启动时也会跑一次。任务只调用 `ClockService.now()` 决定有没有到点，不把操作系统时间当成业务日。每日报单检查和职位分红发放都可以重复执行：已经报过的自然日、已经入账的业务号、已经写过的分红记录不会再记一笔。
 
 ## 微信支付
 
