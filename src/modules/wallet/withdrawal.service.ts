@@ -93,6 +93,7 @@ export class WithdrawalService {
     }
     const now = await this.clock.now();
     const created = await this.prisma.$transaction(async (tx) => {
+      await this.wallet.lockUser(tx, userId);
       const openRefund = await tx.orderRefund.findFirst({
         where: { userId, status: REFUND_PENDING },
       });

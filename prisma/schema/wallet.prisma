@@ -127,7 +127,8 @@ model WithdrawalSettlement {
 }
 
 /// 可提现账户的入账来源和当前显示名。分类按显示名文本归组，不按来源编码归组。
-/// TODO(§4.1): 官方七个默认中文名不在本仓库。默认显示名等于来源编码，管理端可以改。
+/// 默认七个显示名见 §4.1：系统奖励、系统激励、平台分红、系统红包、销售激励、幸运返还、业绩奖。
+/// filing_settlement 是报单结算进入提现账户的部分。管理端可以改显示名。
 model WithdrawalDisplaySource {
   id               BigInt   @id @default(autoincrement())
   sourceCode       String   @unique(map: "withdrawal_display_sources_source_code_uq") @map("source_code") @db.VarChar(64)

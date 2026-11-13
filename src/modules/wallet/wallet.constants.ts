@@ -19,24 +19,37 @@ export const LEDGER_WITHDRAWAL_PAYOUT = 'withdrawal_payout';
 export const LEDGER_MALL_REFUND = 'mall_refund';
 
 /**
- * 奖励流水里已经预留、并且可以进入可提现账户的来源。
- * TODO(§4.1): 官方七个默认显示名和来源映射不在本仓库，这里不预置中文名。
- * 默认显示名等于来源编码。管理端改成相同文本后，按显示名归成一个分类。
- * 确认需求前不要再增加来源。
+ * §4.1 可提现账户的入账来源。显示名相同的来源归成一个分类。
+ * 不要在这张表之外再加来源。
  */
 export const WITHDRAWAL_DISPLAY_SOURCES = [
-  'startup_sales',
-  'startup_points',
-  'mall_sales',
-  'mall_points',
-  'position_dividend',
   'cofounder',
   'studio',
   'operations',
   'red_packet',
+  'startup_sales',
+  'startup_points',
+  'mall_sales',
+  'mall_points',
+  'filing_settlement',
+  'position_dividend',
 ] as const;
 
 export type WithdrawalDisplaySourceCode = (typeof WITHDRAWAL_DISPLAY_SOURCES)[number];
+
+/** 新库和尚未配置过的来源使用这些显示名。管理端可以改。 */
+export const WITHDRAWAL_DISPLAY_DEFAULTS: Record<WithdrawalDisplaySourceCode, string> = {
+  cofounder: '系统奖励',
+  studio: '系统激励',
+  operations: '平台分红',
+  red_packet: '系统红包',
+  startup_sales: '销售激励',
+  startup_points: '销售激励',
+  mall_sales: '销售激励',
+  mall_points: '销售激励',
+  filing_settlement: '幸运返还',
+  position_dividend: '业绩奖',
+};
 
 export const WITHDRAWAL_PENDING = 'pending';
 export const WITHDRAWAL_REJECTED = 'rejected';

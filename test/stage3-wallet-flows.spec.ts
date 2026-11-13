@@ -3,7 +3,10 @@ import type { ClockService } from '../src/common/clock/clock.service';
 import type { PrismaService } from '../src/common/prisma/prisma.service';
 import { PRODUCT_ZONE_MALL, PRODUCT_ZONE_STARTUP } from '../src/modules/catalog/catalog.constants';
 import { RefundsService } from '../src/modules/orders/refunds.service';
-import type { WechatPayGateway } from '../src/modules/payments/wechat-pay.gateway';
+import {
+  WechatRefundAlreadyAccepted,
+  type WechatPayGateway,
+} from '../src/modules/payments/wechat-pay.gateway';
 import type { WechatPaySettingsService } from '../src/modules/payments/wechat-pay-settings.service';
 import { BankAccountService } from '../src/modules/wallet/bank-account.service';
 import { CashLedgerService } from '../src/modules/wallet/cash-ledger.service';
@@ -254,27 +257,66 @@ describe('stage 3 wallets, transfers, withdrawals, and mall refunds', () => {
       bizId: 'b',
       sourceCode: 'mall_sales',
     });
-    const separate = await names.categoriesForUser(userId);
-    expect(separate.balanceFen).toBe(3_500n);
-    expect(separate.categories.find((item) => item.displayName === 'startup_sales')?.totalFen).toBe(
-      1_000n,
+    await stage.wallet.credit({
+      userId,
+      walletType: 'withdrawable',
+      amountFen: 400n,
+      bizType: 'reward',
+      bizId: 'filing',
+      sourceCode: 'filing_settlement',
+    });
+    await stage.wallet.credit({
+      userId,
+      walletType: 'withdrawable',
+      amountFen: 600n,
+      bizType: 'reward',
+      bizId: 'position',
+      sourceCode: 'position_dividend',
+    });
+    const fresh = await names.categoriesForUser(userId);
+    expect(fresh.balanceFen).toBe(4_500n);
+    expect(fresh.categories).toHaveLength(7);
+    const byName = new Map(fresh.categories.map((item) => [item.displayName, item]));
+    expect([...byName.keys()].sort()).toEqual(
+      ['业绩奖', '幸运返还', '平台分红', '系统奖励', '系统激励', '系统红包', '销售激励'].sort(),
     );
-    expect(separate.categories.find((item) => item.displayName === 'mall_sales')?.totalFen).toBe(
-      2_500n,
+    expect(byName.get('销售激励')).toMatchObject({
+      totalFen: 3_500n,
+      sourceCodes: ['mall_points', 'mall_sales', 'startup_points', 'startup_sales'],
+    });
+    expect(byName.get('幸运返还')?.sourceCodes).toEqual(['filing_settlement']);
+    expect(byName.get('幸运返还')?.totalFen).toBe(400n);
+    expect(byName.get('业绩奖')).toMatchObject({
+      totalFen: 600n,
+      sourceCodes: ['position_dividend'],
+    });
+    expect(byName.get('系统奖励')?.sourceCodes).toEqual(['cofounder']);
+    expect(byName.get('系统激励')?.sourceCodes).toEqual(['studio']);
+    expect(byName.get('平台分红')?.sourceCodes).toEqual(['operations']);
+    expect(byName.get('系统红包')?.sourceCodes).toEqual(['red_packet']);
+    const listed = await names.listSources();
+    expect(listed.items.find((item) => item.sourceCode === 'filing_settlement')?.displayName).toBe(
+      '幸运返还',
     );
 
     await names.updateSources(
       [
-        { sourceCode: 'startup_sales', displayName: '销售奖' },
-        { sourceCode: 'mall_sales', displayName: '销售奖' },
+        { sourceCode: 'filing_settlement', displayName: '合并奖' },
+        { sourceCode: 'position_dividend', displayName: '合并奖' },
       ],
       3n,
     );
     const grouped = await names.categoriesForUser(userId);
-    const sales = grouped.categories.find((item) => item.displayName === '销售奖');
-    expect(sales?.totalFen).toBe(3_500n);
-    expect(sales?.sourceCodes).toEqual(['mall_sales', 'startup_sales']);
-    const ledger = await names.categoryLedger(userId, '销售奖', 1, 10);
+    expect(grouped.categories).toHaveLength(6);
+    const merged = grouped.categories.find((item) => item.displayName === '合并奖');
+    expect(merged).toMatchObject({
+      totalFen: 1_000n,
+      sourceCodes: ['filing_settlement', 'position_dividend'],
+    });
+    expect(grouped.categories.find((item) => item.displayName === '销售激励')?.totalFen).toBe(
+      3_500n,
+    );
+    const ledger = await names.categoryLedger(userId, '销售激励', 1, 10);
     expect(ledger.total).toBe(2);
     expect(
       ledger.items.map((item) => item.amountFen).sort((left, right) => (left < right ? -1 : 1)),
@@ -472,12 +514,136 @@ describe('stage 3 wallets, transfers, withdrawals, and mall refunds', () => {
     expect(approved.wechatRefundFen).toBe(2_000);
     expect(approved.consumptionCreditFen).toBe(0);
     expect(stage.gateway.createDomesticRefund).toHaveBeenLastCalledWith(
-      expect.objectContaining({ refundFen: 2_000, totalFen: 2_000 }),
+      expect.objectContaining({
+        refundFen: 2_000,
+        totalFen: 2_000,
+        outRefundNo: `RF${applied.id.toString()}`,
+      }),
+    );
+    expect(stage.gateway.createDomesticRefund).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ outRefundNo: `RF${applied.id.toString()}` }),
     );
     expect(stage.db.cashLedgerEntry.rows[0]).toMatchObject({
       amountFen: 2_000n,
       bizType: 'wechat_refund',
     });
+  });
+
+  it('finishes a local refund after WeChat already accepted it, without a second refund', async () => {
+    const stage = buildStage2();
+    const rootId = await boot(stage);
+    const buyer = await loginBuyer(stage, 'retry-refund', rootId);
+    makeMember(stage, buyer);
+    const { refunds } = wire(stage);
+    const addressId = await addressOf(stage, buyer);
+    const product = await stage.catalog.create({
+      zone: PRODUCT_ZONE_MALL,
+      name: '重试退款',
+      freightFen: 0,
+      priceFen: 2_000,
+      pvFen: 10,
+      stockQuantity: 2,
+      status: 'on',
+    });
+    const order = await paidMall(stage, buyer, addressId, product.product.id);
+    const secondOrder = await paidMall(stage, buyer, addressId, product.product.id);
+    const applied = await refunds.apply(buyer, order.id);
+    stage.paySettings.credentials = {
+      merchantId: 'mch',
+      apiV3Key: 'k'.repeat(32),
+      certificatePem: 'cert',
+      privateKeyPem: 'key',
+      serialNumber: 'serial',
+    };
+    const table = stage.db.orderRefund;
+    const original = table.update.bind(table);
+    let failedLocalCommit = false;
+    table.update = (args) => {
+      const data = args.data as { status?: string };
+      if (!failedLocalCommit && data.status === 'approved') {
+        failedLocalCommit = true;
+        throw new Error('local commit failed');
+      }
+      return original(args);
+    };
+    stage.gateway.createDomesticRefund.mockResolvedValue({
+      refundId: 'wx-refund',
+      status: 'PROCESSING',
+    });
+    await expect(refunds.approve(applied.id, 1n, { refundFen: 2_000 })).rejects.toThrow(
+      'local commit failed',
+    );
+    expect(stage.gateway.createDomesticRefund).toHaveBeenCalledTimes(1);
+    expect(stage.db.orderRefund.rows[0]).toMatchObject({
+      status: 'pending',
+      wechatRefundStatus: 'accepted',
+      wechatRefundNo: `RF${applied.id.toString()}`,
+      wechatRefundFen: 2_000,
+    });
+    expect(stage.db.cashLedgerEntry.rows).toHaveLength(0);
+
+    const approved = await refunds.approve(applied.id, 1n, { refundFen: 2_000 });
+    expect(stage.gateway.createDomesticRefund).toHaveBeenCalledTimes(1);
+    expect(approved).toMatchObject({
+      status: 'approved',
+      wechatRefundStatus: 'accepted',
+      wechatRefundFen: 2_000,
+    });
+    expect(stage.db.cashLedgerEntry.rows).toHaveLength(1);
+
+    const again = await refunds.apply(buyer, secondOrder.id);
+    stage.gateway.createDomesticRefund.mockRejectedValueOnce(new WechatRefundAlreadyAccepted());
+    const reconciled = await refunds.approve(again.id, 1n, { refundFen: 2_000 });
+    expect(reconciled).toMatchObject({
+      status: 'approved',
+      wechatRefundStatus: 'accepted',
+      wechatRefundFen: 2_000,
+    });
+    expect(stage.gateway.createDomesticRefund).toHaveBeenCalledTimes(2);
+    expect(stage.gateway.createDomesticRefund).toHaveBeenLastCalledWith(
+      expect.objectContaining({ outRefundNo: `RF${again.id.toString()}` }),
+    );
+  });
+
+  it('does not create a pending withdrawal and a pending mall refund together', async () => {
+    const stage = buildStage2();
+    const rootId = await boot(stage);
+    const buyer = await loginBuyer(stage, 'mutex-race', rootId);
+    makeMember(stage, buyer);
+    const { banks, withdrawals, refunds } = wire(stage, { withdrawalFeeFen: 0 });
+    await stage.kyc.submit(buyer, KYC);
+    await banks.save(buyer, BANK);
+    await credit(stage, buyer, 'withdrawable', 50_000);
+    const addressId = await addressOf(stage, buyer);
+    const product = await stage.catalog.create({
+      zone: PRODUCT_ZONE_MALL,
+      name: '并发互斥',
+      freightFen: 0,
+      priceFen: 1_000,
+      pvFen: 10,
+      stockQuantity: 2,
+      status: 'on',
+    });
+    const order = await paidMall(stage, buyer, addressId, product.product.id);
+    const results = await Promise.allSettled([
+      withdrawals.apply(buyer, 10_000n),
+      refunds.apply(buyer, order.id),
+    ]);
+    const fulfilled = results.filter((item) => item.status === 'fulfilled');
+    const rejected = results.filter((item) => item.status === 'rejected');
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toHaveLength(1);
+    const reason = rejected[0]?.status === 'rejected' ? rejected[0].reason : null;
+    const message = reason instanceof Error ? reason.message : '';
+    expect(
+      message === '有未结算的商城退款，不能提现' || message === '有未完成的提现，不能申请退款',
+    ).toBe(true);
+    const pendingWithdrawals = stage.db.withdrawalApplication.rows.filter(
+      (row) => row.status === 'pending',
+    );
+    const pendingRefunds = stage.db.orderRefund.rows.filter((row) => row.status === 'pending');
+    expect(pendingWithdrawals.length + pendingRefunds.length).toBe(1);
   });
 });
 

@@ -1,4 +1,3 @@
-import { randomBytes } from 'node:crypto';
 import {
   BadRequestException,
   ConflictException,
@@ -10,8 +9,11 @@ import {
 import type { Order, OrderRefund } from '@prisma/client';
 import { ClockService } from '../../common/clock/clock.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
-import { WechatPayGateway } from '../payments/wechat-pay.gateway';
-import { WechatPaySettingsService } from '../payments/wechat-pay-settings.service';
+import { WechatPayGateway, WechatRefundAlreadyAccepted } from '../payments/wechat-pay.gateway';
+import {
+  WechatPaySettingsService,
+  type WechatPayCredentials,
+} from '../payments/wechat-pay-settings.service';
 import { WECHAT_PAY_CHANNEL } from '../payments/wechat-pay.constants';
 import { PRODUCT_ZONE_MALL, PRODUCT_ZONE_STARTUP } from '../catalog/catalog.constants';
 import { CashLedgerService } from '../wallet/cash-ledger.service';
@@ -84,6 +86,7 @@ export class RefundsService {
     assertRefundableOrder(order);
     const now = await this.clock.now();
     const created = await this.prisma.$transaction(async (tx) => {
+      await this.wallet.lockUser(tx, userId);
       const openWithdrawal = await tx.withdrawalApplication.findFirst({
         where: { userId, status: WITHDRAWAL_PENDING },
       });
@@ -184,32 +187,12 @@ export class RefundsService {
       deductionFen: amounts.deductionFen,
     });
     const credentials = await this.settings.readCredentials();
-    let wechatRefundNo: string | null = null;
-    let wechatRefundStatus = WECHAT_NONE;
-    if (allocation.wechatRefundFen > 0) {
-      wechatRefundNo = createRefundNo(current.id);
-      if (credentials) {
-        const payment = await this.prisma.payment.findFirst({
-          where: { orderId: order.id, channel: WECHAT_PAY_CHANNEL, status: 'success' },
-          orderBy: { id: 'desc' },
-        });
-        if (!payment || payment.amountFen !== order.wechatFen) {
-          throw new ConflictException('缺少微信支付记录');
-        }
-        await this.gateway.createDomesticRefund({
-          merchantId: credentials.merchantId,
-          privateKeyPem: credentials.privateKeyPem,
-          certificateSerial: credentials.serialNumber,
-          outTradeNo: payment.payNo,
-          outRefundNo: wechatRefundNo,
-          refundFen: allocation.wechatRefundFen,
-          totalFen: payment.amountFen,
-        });
-        wechatRefundStatus = WECHAT_ACCEPTED;
-      } else {
-        wechatRefundStatus = WECHAT_SANDBOX;
-      }
-    }
+    const acceptance = await this.acceptWechatRefund(
+      current,
+      order,
+      allocation.wechatRefundFen,
+      credentials,
+    );
     const now = await this.clock.now();
     const updated = await this.prisma.$transaction(async (tx) => {
       const fresh = await tx.orderRefund.findUnique({ where: { id: current.id } });
@@ -265,8 +248,8 @@ export class RefundsService {
           wechatRefundFen: again.wechatRefundFen,
           withdrawableDeductionFen: again.withdrawableDeductionFen,
           consumptionCreditFen: again.consumptionCreditFen,
-          wechatRefundStatus,
-          wechatRefundNo,
+          wechatRefundStatus: acceptance.status,
+          wechatRefundNo: acceptance.refundNo,
           decidedAt: now,
           decidedByAdminId: adminId,
           updatedAt: now,
@@ -299,6 +282,69 @@ export class RefundsService {
     return toView(updated);
   }
 
+  /**
+   * 同一笔退款申请的 out_refund_no 固定。微信已受理后只补本地入账，不再发起第二笔退款。
+   */
+  private async acceptWechatRefund(
+    current: OrderRefund,
+    order: Order,
+    wechatRefundFen: number,
+    credentials: WechatPayCredentials | null,
+  ): Promise<{ status: string; refundNo: string | null }> {
+    if (wechatRefundFen <= 0) {
+      return { status: WECHAT_NONE, refundNo: null };
+    }
+    const refundNo = stableRefundNo(current.id);
+    if (!credentials) {
+      return { status: WECHAT_SANDBOX, refundNo };
+    }
+    const recorded = await this.prisma.orderRefund.findUnique({ where: { id: current.id } });
+    if (recorded?.wechatRefundStatus === WECHAT_ACCEPTED) {
+      if (recorded.wechatRefundNo !== refundNo || recorded.wechatRefundFen !== wechatRefundFen) {
+        throw new ConflictException('退款金额已变化');
+      }
+      return { status: WECHAT_ACCEPTED, refundNo };
+    }
+    const payment = await this.prisma.payment.findFirst({
+      where: { orderId: order.id, channel: WECHAT_PAY_CHANNEL, status: 'success' },
+      orderBy: { id: 'desc' },
+    });
+    if (!payment || payment.amountFen !== order.wechatFen) {
+      throw new ConflictException('缺少微信支付记录');
+    }
+    const notedAt = await this.clock.now();
+    await this.prisma.orderRefund.update({
+      where: { id: current.id },
+      data: { wechatRefundNo: refundNo, updatedAt: notedAt },
+    });
+    try {
+      await this.gateway.createDomesticRefund({
+        merchantId: credentials.merchantId,
+        privateKeyPem: credentials.privateKeyPem,
+        certificateSerial: credentials.serialNumber,
+        outTradeNo: payment.payNo,
+        outRefundNo: refundNo,
+        refundFen: wechatRefundFen,
+        totalFen: payment.amountFen,
+      });
+    } catch (error) {
+      if (!(error instanceof WechatRefundAlreadyAccepted)) {
+        throw error;
+      }
+    }
+    const acceptedAt = await this.clock.now();
+    await this.prisma.orderRefund.update({
+      where: { id: current.id },
+      data: {
+        wechatRefundNo: refundNo,
+        wechatRefundStatus: WECHAT_ACCEPTED,
+        wechatRefundFen,
+        updatedAt: acceptedAt,
+      },
+    });
+    return { status: WECHAT_ACCEPTED, refundNo };
+  }
+
   private async list(
     where: { userId?: bigint; status?: string },
     page: number,
@@ -329,8 +375,8 @@ function assertRefundableOrder(order: Order): void {
   }
 }
 
-function createRefundNo(refundId: bigint): string {
-  return `R${refundId.toString()}${randomBytes(4).toString('hex')}`.slice(0, 64);
+function stableRefundNo(refundId: bigint): string {
+  return `RF${refundId.toString()}`;
 }
 
 function toView(row: OrderRefund): RefundView {

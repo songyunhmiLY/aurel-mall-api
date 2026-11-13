@@ -5,6 +5,7 @@ import { PrismaService } from '../../common/prisma/prisma.service';
 import {
   LEDGER_CREDIT,
   WALLET_WITHDRAWABLE,
+  WITHDRAWAL_DISPLAY_DEFAULTS,
   WITHDRAWAL_DISPLAY_SOURCES,
   isWithdrawalDisplaySource,
 } from './wallet.constants';
@@ -138,7 +139,7 @@ export class DisplayNameService {
     const byCode = new Map(rows.map((row) => [row.sourceCode, row.displayName]));
     return WITHDRAWAL_DISPLAY_SOURCES.map((sourceCode) => ({
       sourceCode,
-      displayName: byCode.get(sourceCode) ?? sourceCode,
+      displayName: byCode.get(sourceCode) ?? WITHDRAWAL_DISPLAY_DEFAULTS[sourceCode],
     }));
   }
 
@@ -156,7 +157,7 @@ export class DisplayNameService {
         await tx.withdrawalDisplaySource.create({
           data: {
             sourceCode,
-            displayName: sourceCode,
+            displayName: WITHDRAWAL_DISPLAY_DEFAULTS[sourceCode],
             updatedAt: now,
             updatedByAdminId: adminId,
           },

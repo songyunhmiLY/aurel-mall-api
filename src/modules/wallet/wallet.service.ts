@@ -291,6 +291,15 @@ export class WalletService {
     );
   }
 
+  /**
+   * 锁住用户行。提现申请和商城退款申请都先拿这把锁，再检查互斥，避免两边同时成功。
+   */
+  async lockUser(tx: Tx, userId: bigint): Promise<void> {
+    await tx.$queryRaw`
+      SELECT id FROM users WHERE id = ${userId} FOR UPDATE
+    `;
+  }
+
   async lockAll(tx: Tx, userId: bigint, now: Date): Promise<void> {
     await this.ensureAccounts(tx, userId, now);
     for (const walletType of WALLET_TYPES) {

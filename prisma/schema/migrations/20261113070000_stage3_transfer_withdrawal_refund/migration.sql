@@ -81,8 +81,7 @@ CREATE TABLE `withdrawal_settlements` (
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 -- CreateTable
--- TODO(section 4.1): the official seven Chinese display names are not in this repo.
--- Placeholder labels equal the reserved reward source codes. Admins can rename them.
+-- §4.1 default display names. Sources that share a name are one category.
 CREATE TABLE `withdrawal_display_sources` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `source_code` VARCHAR(64) NOT NULL,
@@ -96,15 +95,16 @@ CREATE TABLE `withdrawal_display_sources` (
 
 INSERT INTO `withdrawal_display_sources` (`source_code`, `display_name`, `updated_at`, `updated_by_admin_id`)
 VALUES
-    ('startup_sales', 'startup_sales', '2026-11-13 00:00:00.000', NULL),
-    ('startup_points', 'startup_points', '2026-11-13 00:00:00.000', NULL),
-    ('mall_sales', 'mall_sales', '2026-11-13 00:00:00.000', NULL),
-    ('mall_points', 'mall_points', '2026-11-13 00:00:00.000', NULL),
-    ('position_dividend', 'position_dividend', '2026-11-13 00:00:00.000', NULL),
-    ('cofounder', 'cofounder', '2026-11-13 00:00:00.000', NULL),
-    ('studio', 'studio', '2026-11-13 00:00:00.000', NULL),
-    ('operations', 'operations', '2026-11-13 00:00:00.000', NULL),
-    ('red_packet', 'red_packet', '2026-11-13 00:00:00.000', NULL);
+    ('cofounder', '系统奖励', '2026-11-13 00:00:00.000', NULL),
+    ('studio', '系统激励', '2026-11-13 00:00:00.000', NULL),
+    ('operations', '平台分红', '2026-11-13 00:00:00.000', NULL),
+    ('red_packet', '系统红包', '2026-11-13 00:00:00.000', NULL),
+    ('startup_sales', '销售激励', '2026-11-13 00:00:00.000', NULL),
+    ('startup_points', '销售激励', '2026-11-13 00:00:00.000', NULL),
+    ('mall_sales', '销售激励', '2026-11-13 00:00:00.000', NULL),
+    ('mall_points', '销售激励', '2026-11-13 00:00:00.000', NULL),
+    ('filing_settlement', '幸运返还', '2026-11-13 00:00:00.000', NULL),
+    ('position_dividend', '业绩奖', '2026-11-13 00:00:00.000', NULL);
 
 -- CreateTable
 CREATE TABLE `cash_ledger_entries` (

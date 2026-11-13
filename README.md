@@ -326,7 +326,7 @@ T **不是**锁定项。环境变量 `MARKETING_MANAGER_MARKET_THRESHOLD_DEFAULT
 
 扣款和入账写 `wallet_ledger_entries`。冻结和释放不写流水，因为余额还没变。订单支付的 `bizType` 仍是 `order_payment`。可提现入账可以带 `sourceCode`，显示名不写在流水上。
 
-可提现账户可以按显示名查看分类合计和流水。来源目前是奖励流水里已经预留的九个编码，默认显示名等于编码。管理端把多个来源改成同一个显示名后，会员侧按显示名文本合成一个分类。官方需求里的七个中文默认名还没有写进本仓库，所以这里没有预置中文名，也不接受这九个编码以外的来源。
+可提现账户可以按显示名查看分类合计和流水。新库预置七个显示名，来源已经按官方对照分组：系统奖励（`cofounder`）、系统激励（`studio`）、平台分红（`operations`）、系统红包（`red_packet`）、销售激励（`startup_sales`、`startup_points`、`mall_sales`、`mall_points`）、幸运返还（`filing_settlement`，报单结算进入提现账户的部分）、业绩奖（`position_dividend`）。管理端把多个来源改成同一个显示名后，会员侧按显示名文本合成一个分类。不接受这十个来源以外的编码。
 
 需要管理员令牌：
 
