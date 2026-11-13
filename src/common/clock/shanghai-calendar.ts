@@ -21,6 +21,26 @@ function fromShanghaiWall(year: number, monthIndex: number, day: number): Date {
   return new Date(Date.UTC(year, monthIndex, day) - SHANGHAI_OFFSET_MS);
 }
 
+/** 腾讯云签名 Credential 里的日期。必须是时间戳的 UTC 日期，不能用上海日期。 */
+export function formatUtcDate(unixSeconds: number): string {
+  const instant = new Date(unixSeconds * 1000);
+  const year = instant.getUTCFullYear().toString();
+  const month = String(instant.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(instant.getUTCDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+/** 微信订阅消息 time 槽接受的 24 小时格式，按 Asia/Shanghai。 */
+export function formatShanghaiMinute(instant: Date): string {
+  const shifted = new Date(instant.getTime() + SHANGHAI_OFFSET_MS);
+  const year = shifted.getUTCFullYear().toString();
+  const month = String(shifted.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(shifted.getUTCDate()).padStart(2, '0');
+  const hour = String(shifted.getUTCHours()).padStart(2, '0');
+  const minute = String(shifted.getUTCMinutes()).padStart(2, '0');
+  return `${year}-${month}-${day} ${hour}:${minute}`;
+}
+
 export function startOfShanghaiDay(instant: Date): Date {
   const wall = shanghaiWallClock(instant);
   return fromShanghaiWall(wall.year, wall.monthIndex, wall.day);

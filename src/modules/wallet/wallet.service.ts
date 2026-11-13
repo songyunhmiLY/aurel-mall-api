@@ -6,6 +6,8 @@ import {
 } from '@nestjs/common';
 import type { Prisma, WalletAccount } from '@prisma/client';
 import { ClockService } from '../../common/clock/clock.service';
+import { enqueueNotify } from '../../common/notify/notify-buffer';
+import { walletCreditNotifies } from '../../common/notify/notify-intent';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import {
   HOLD_CAPTURED,
@@ -170,6 +172,18 @@ export class WalletService {
         occurredAt: now,
         createdAt: now,
       },
+    });
+    if (!walletCreditNotifies(input.bizType)) {
+      return;
+    }
+    enqueueNotify({
+      type: 'wallet_credit',
+      userId: input.userId,
+      walletType: input.walletType,
+      amountFen: input.amountFen,
+      bizType: input.bizType,
+      bizId: input.bizId,
+      occurredAt: now,
     });
   }
 

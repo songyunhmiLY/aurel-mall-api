@@ -8,6 +8,7 @@ import {
 } from '@nestjs/common';
 import type { Prisma, WithdrawalApplication, WithdrawalSettlement } from '@prisma/client';
 import { ClockService } from '../../common/clock/clock.service';
+import { enqueueNotify } from '../../common/notify/notify-buffer';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import type { LockedRuntimeConfig } from '../../config/locked-runtime';
 import { LOCKED_RUNTIME_CONFIG } from '../../config/tokens';
@@ -102,7 +103,7 @@ export class WithdrawalService {
       }
       await this.wallet.lockAll(tx, userId, now);
       await this.wallet.freezeAmount(tx, userId, WALLET_WITHDRAWABLE, amountFen, now);
-      return tx.withdrawalApplication.create({
+      const created = await tx.withdrawalApplication.create({
         data: {
           userId,
           amountFen,
@@ -116,6 +117,16 @@ export class WithdrawalService {
           updatedAt: now,
         },
       });
+      enqueueNotify({
+        type: 'withdrawal_outcome',
+        userId,
+        status: 'pending',
+        amountFen,
+        payoutFen: 0n,
+        orderNo: created.id.toString(),
+        occurredAt: now,
+      });
+      return created;
     });
     return toView(created, null);
   }
@@ -199,6 +210,15 @@ export class WithdrawalService {
           createdAt: now,
         },
       });
+      enqueueNotify({
+        type: 'withdrawal_outcome',
+        userId: current.userId,
+        status: 'rejected',
+        amountFen: current.amountFen,
+        payoutFen: 0n,
+        orderNo: current.id.toString(),
+        occurredAt: now,
+      });
       return { updated, settlement };
     });
     return toView(row.updated, row.settlement);
@@ -244,6 +264,15 @@ export class WithdrawalService {
         amountFen: payoutFen,
         bizType: CASH_WITHDRAWAL_PAYOUT,
         bizId: current.id.toString(),
+        occurredAt: now,
+      });
+      enqueueNotify({
+        type: 'withdrawal_outcome',
+        userId: current.userId,
+        status: 'paid',
+        amountFen: current.amountFen,
+        payoutFen,
+        orderNo: current.id.toString(),
         occurredAt: now,
       });
       return { updated, settlement };

@@ -1,6 +1,7 @@
 import { Inject, Injectable, InternalServerErrorException } from '@nestjs/common';
 import type { Prisma, StartupSubOrder } from '@prisma/client';
 import { ClockService } from '../../../common/clock/clock.service';
+import { enqueueNotify } from '../../../common/notify/notify-buffer';
 import {
   nextShanghaiDate,
   shanghaiAt,
@@ -288,6 +289,21 @@ export class FilingService {
     await tx.filing.update({
       where: { id: beneficiary.id },
       data: { status: FILING_SETTLED, settledAt: now, updatedAt: now },
+    });
+    let orderNo = beneficiary.filingNo;
+    if (beneficiary.orderId !== null) {
+      const order = await tx.order.findUnique({ where: { id: beneficiary.orderId } });
+      if (order) {
+        orderNo = order.orderNo;
+      }
+    }
+    enqueueNotify({
+      type: 'lucky_return_credited',
+      userId: beneficiary.userId,
+      pointsFen,
+      withdrawableFen,
+      orderNo,
+      occurredAt: now,
     });
   }
 }
