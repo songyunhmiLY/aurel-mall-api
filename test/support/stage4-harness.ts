@@ -2,6 +2,13 @@ import type { ClockService } from '../../src/common/clock/clock.service';
 import type { PrismaService } from '../../src/common/prisma/prisma.service';
 import type { LockedRuntimeConfig } from '../../src/config/locked-runtime';
 import { DueJobRunner } from '../../src/jobs/due-job.runner';
+import { CofounderAdminService } from '../../src/modules/cofounder/cofounder-admin.service';
+import { CofounderDividendService } from '../../src/modules/cofounder/cofounder-dividend.service';
+import { CofounderEnrollmentService } from '../../src/modules/cofounder/cofounder-enrollment.service';
+import { CofounderPayService } from '../../src/modules/cofounder/cofounder-pay.service';
+import { CofounderPoolService } from '../../src/modules/cofounder/cofounder-pool.service';
+import { CofounderReviewService } from '../../src/modules/cofounder/cofounder-review.service';
+import { CofounderSettingsService } from '../../src/modules/cofounder/cofounder-settings.service';
 import { OrderPaymentSettler } from '../../src/modules/orders/order-payment.settler';
 import { OrdersService } from '../../src/modules/orders/orders.service';
 import { PaymentSettlementHook } from '../../src/modules/orders/payment-settlement.hook';
@@ -25,6 +32,8 @@ import { RedPacketService } from '../../src/modules/rewards/red-packet/red-packe
 import { TeamService } from '../../src/modules/rewards/team/team.service';
 import { TreesService } from '../../src/modules/rewards/trees/trees.service';
 import { SettingsService } from '../../src/modules/settings/settings.service';
+import { CashLedgerService } from '../../src/modules/wallet/cash-ledger.service';
+import { DisplayNameService } from '../../src/modules/wallet/display-name.service';
 import { WalletAdminService } from '../../src/modules/wallet/wallet-admin.service';
 import { WalletService } from '../../src/modules/wallet/wallet.service';
 import { lockedConfig, stage1Env, buildStage1 } from './stage1-harness';
@@ -54,7 +63,17 @@ export function buildStage4(locked: LockedRuntimeConfig = stage4Locked(), thresh
   const credits = new AwardCreditService(wallet);
   const filing = new FilingService(prisma, clock, locked, credits);
   const awards = new AwardService(locked, credits);
-  const paid = new PaymentSettlementService(filing, awards);
+  const cofounderPool = new CofounderPoolService(prisma);
+  const cofounderSettings = new CofounderSettingsService(prisma, clock);
+  const cofounderDividend = new CofounderDividendService(
+    prisma,
+    clock,
+    locked,
+    credits,
+    cofounderPool,
+    cofounderSettings,
+  );
+  const paid = new PaymentSettlementService(filing, awards, cofounderDividend);
   const hook = new PaymentSettlementHook(paid);
   const settlement = new OrderPaymentSettler(wallet, trees, hook);
   const paySettings: {
@@ -80,13 +99,41 @@ export function buildStage4(locked: LockedRuntimeConfig = stage4Locked(), thresh
     settlement,
   );
   const orders = new OrdersService(prisma, clock, wallet, trees, settlement, wechatPay, locked);
+  const cash = new CashLedgerService();
+  const cofounderEnrollment = new CofounderEnrollmentService(
+    prisma,
+    clock,
+    cofounderPool,
+    cofounderSettings,
+    cash,
+  );
+  wechatPay.bindActivationSettler(cofounderEnrollment);
+  const cofounderPay = new CofounderPayService(
+    prisma,
+    clock,
+    cofounderPool,
+    cofounderEnrollment,
+    wechatPay,
+  );
+  const cofounderReview = new CofounderReviewService(prisma);
+  const cofounderAdmin = new CofounderAdminService(
+    prisma,
+    clock,
+    cofounderSettings,
+    cofounderPool,
+    cofounderDividend,
+    cofounderEnrollment,
+    cofounderReview,
+    locked,
+  );
+  const displayNames = new DisplayNameService(prisma, clock, wallet);
   const settings = new SettingsService(prisma, clock, env);
   const performance = new MarketPerformanceService(prisma);
   const positions = new PositionsService(prisma, clock, locked, settings, performance, credits);
   const team = new TeamService(prisma, clock, performance);
   const redPackets = new RedPacketService(prisma, clock, locked, credits);
   const welfareAdmin = new RedPacketAdminService(prisma, clock, redPackets);
-  const jobs = new DueJobRunner(filing, positions, redPackets);
+  const jobs = new DueJobRunner(filing, positions, redPackets, cofounderDividend);
   const network = new NetworkAdminService(prisma, performance);
   const filingQuery = new FilingQueryService(prisma);
   const awardAdmin = new AwardAdminService(prisma);
@@ -113,6 +160,17 @@ export function buildStage4(locked: LockedRuntimeConfig = stage4Locked(), thresh
     walletAdmin,
     performance,
     wechatPay,
+    paySettings,
+    gateway,
+    cofounderPool,
+    cofounderSettings,
+    cofounderDividend,
+    cofounderEnrollment,
+    cofounderPay,
+    cofounderReview,
+    cofounderAdmin,
+    displayNames,
+    cash,
   };
 }
 

@@ -1,0 +1,107 @@
+/// 联合创始人身份。同一用户同时最多一条 active。取消后可以再开通，另写一行。
+/// source: payment 微信支付开通 / appointment 管理员指定。
+/// status: active / cancelled。取消不写退款。
+model CofounderEnrollment {
+  id                 BigInt    @id @default(autoincrement())
+  userId             BigInt    @map("user_id")
+  status             String    @db.VarChar(32)
+  source             String    @db.VarChar(32)
+  activationId       BigInt?   @map("activation_id")
+  appointedByAdminId BigInt?   @map("appointed_by_admin_id")
+  enrolledAt         DateTime  @map("enrolled_at") @db.DateTime(3)
+  cancelledAt        DateTime? @map("cancelled_at") @db.DateTime(3)
+  cancelledByAdminId BigInt?   @map("cancelled_by_admin_id")
+  createdAt          DateTime  @map("created_at") @db.DateTime(3)
+  updatedAt          DateTime  @map("updated_at") @db.DateTime(3)
+
+  @@index([userId, status], map: "cofounder_enrollments_user_status_idx")
+  @@index([status, enrolledAt], map: "cofounder_enrollments_status_enrolled_idx")
+  @@map("cofounder_enrollments")
+}
+
+/// 微信支付开通。status: pending / succeeded / failed。
+/// 成功时写现金流入，不生成商品订单。
+model CofounderActivation {
+  id          BigInt    @id @default(autoincrement())
+  userId      BigInt    @map("user_id")
+  amountFen   Int       @map("amount_fen")
+  status      String    @db.VarChar(32)
+  paymentId   BigInt    @unique(map: "cofounder_activations_payment_id_uq") @map("payment_id")
+  succeededAt DateTime? @map("succeeded_at") @db.DateTime(3)
+  createdAt   DateTime  @map("created_at") @db.DateTime(3)
+  updatedAt   DateTime  @map("updated_at") @db.DateTime(3)
+
+  @@index([userId, status], map: "cofounder_activations_user_status_idx")
+  @@map("cofounder_activations")
+}
+
+/// 模式 2–4 的累计池。slot 固定为 1。即时分配不往这里加钱。
+model CofounderPool {
+  id         BigInt   @id @default(autoincrement())
+  slot       Int      @unique(map: "cofounder_pools_slot_uq")
+  balanceFen BigInt   @map("balance_fen")
+  updatedAt  DateTime @map("updated_at") @db.DateTime(3)
+
+  @@map("cofounder_pools")
+}
+
+/// 一笔已支付订单只计提一次。金额为 0 的不写。
+/// baseField: goods_total_fen 创业专区应付（N × 件数）/ pv_fen 商城 PV。
+model CofounderAccrual {
+  id         BigInt   @id @default(autoincrement())
+  orderId    BigInt   @unique(map: "cofounder_accruals_order_id_uq") @map("order_id")
+  userId     BigInt   @map("user_id")
+  zone       String   @db.VarChar(32)
+  baseField  String   @map("base_field") @db.VarChar(32)
+  baseFen    BigInt   @map("base_fen")
+  ratioBps   Int      @map("ratio_bps")
+  amountFen  BigInt   @map("amount_fen")
+  occurredAt DateTime @map("occurred_at") @db.DateTime(3)
+  createdAt  DateTime @map("created_at") @db.DateTime(3)
+
+  @@index([occurredAt], map: "cofounder_accruals_occurred_idx")
+  @@map("cofounder_accruals")
+}
+
+/// 一次实际分配。triggerKey 唯一，同一触发不会分两次。
+/// mode: immediate / periodic / pool_total / per_person / mode_switch。
+/// enrolledCount 为 0 时全额留在系统。均分余数也留在系统，不超分。
+model CofounderPayoutBatch {
+  id             BigInt   @id @default(autoincrement())
+  triggerKey     String   @unique(map: "cofounder_payout_batches_trigger_uq") @map("trigger_key") @db.VarChar(80)
+  mode           String   @db.VarChar(32)
+  totalFen       BigInt   @map("total_fen")
+  enrolledCount  Int      @map("enrolled_count")
+  shareFen       BigInt   @map("share_fen")
+  distributedFen BigInt   @map("distributed_fen")
+  retainedFen    BigInt   @map("retained_fen")
+  paidAt         DateTime @map("paid_at") @db.DateTime(3)
+  createdAt      DateTime @map("created_at") @db.DateTime(3)
+
+  @@index([paidAt], map: "cofounder_payout_batches_paid_idx")
+  @@map("cofounder_payout_batches")
+}
+
+/// 某次分配发给一名当时仍在籍的联合创始人。金额全部进入可提现账户。
+model CofounderPayout {
+  id         BigInt   @id @default(autoincrement())
+  batchId    BigInt   @map("batch_id")
+  userId     BigInt   @map("user_id")
+  amountFen  BigInt   @map("amount_fen")
+  creditedAt DateTime @map("credited_at") @db.DateTime(3)
+  createdAt  DateTime @map("created_at") @db.DateTime(3)
+
+  @@unique([batchId, userId], map: "cofounder_payouts_batch_user_uq")
+  @@index([userId, creditedAt], map: "cofounder_payouts_user_credited_idx")
+  @@map("cofounder_payouts")
+}
+
+/// 已经处理过的定期档期。池子为 0 也记一行，避免同一钟点再触发。
+model CofounderScheduleSlot {
+  id          BigInt   @id @default(autoincrement())
+  slotKey     String   @unique(map: "cofounder_schedule_slots_key_uq") @map("slot_key") @db.VarChar(80)
+  processedAt DateTime @map("processed_at") @db.DateTime(3)
+  createdAt   DateTime @map("created_at") @db.DateTime(3)
+
+  @@map("cofounder_schedule_slots")
+}

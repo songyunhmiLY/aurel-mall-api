@@ -3,6 +3,7 @@ import { Module } from '@nestjs/common';
 import type { AppEnv } from '../config/app-env';
 import { toBullMqConnection } from '../config/redis-url';
 import { APP_ENV } from '../config/tokens';
+import { CofounderModule } from '../modules/cofounder/cofounder.module';
 import { FilingModule } from '../modules/rewards/filing/filing.module';
 import { PositionsModule } from '../modules/rewards/positions/positions.module';
 import { RedPacketModule } from '../modules/rewards/red-packet/red-packet.module';
@@ -23,6 +24,7 @@ import { DUE_QUEUE } from './jobs.constants';
     FilingModule,
     PositionsModule,
     RedPacketModule,
+    CofounderModule,
   ],
   providers: [DueJobRunner, DueJobProcessor, DueJobScheduler],
 })

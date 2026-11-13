@@ -370,6 +370,13 @@ export class Stage1Db {
   readonly redPacketDailyAccrual = new MemoryTable([['bizDate']]);
   readonly redPacketSignup = new MemoryTable([['userId', 'bizDate']]);
   readonly redPacketPayout = new MemoryTable([['userId', 'bizDate']]);
+  readonly cofounderEnrollment = new MemoryTable([]);
+  readonly cofounderActivation = new MemoryTable([['paymentId']]);
+  readonly cofounderPool = new MemoryTable([['slot']]);
+  readonly cofounderAccrual = new MemoryTable([['orderId']]);
+  readonly cofounderPayoutBatch = new MemoryTable([['triggerKey']]);
+  readonly cofounderPayout = new MemoryTable([['batchId', 'userId']]);
+  readonly cofounderScheduleSlot = new MemoryTable([['slotKey']]);
 
   async $queryRaw(
     strings: TemplateStringsArray,
@@ -385,12 +392,14 @@ export class Stage1Db {
       return [
         {
           id: row.id,
-          orderId: row.orderId,
+          orderId: row.orderId ?? null,
           payNo: row.payNo,
           channel: row.channel,
           amountFen: row.amountFen,
           status: row.status,
           succeededAt: row.succeededAt ?? null,
+          purpose: row.purpose ?? 'order',
+          userId: row.userId ?? null,
         },
       ];
     }
@@ -518,6 +527,13 @@ export class Stage1Db {
       this.redPacketDailyAccrual,
       this.redPacketSignup,
       this.redPacketPayout,
+      this.cofounderEnrollment,
+      this.cofounderActivation,
+      this.cofounderPool,
+      this.cofounderAccrual,
+      this.cofounderPayoutBatch,
+      this.cofounderPayout,
+      this.cofounderScheduleSlot,
     ];
   }
 }

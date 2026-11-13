@@ -5,6 +5,8 @@ import { RedisModule } from './common/redis/redis.module';
 import { AppConfigModule } from './config/app-config.module';
 import { JobsModule } from './jobs/jobs.module';
 import { CatalogModule } from './modules/catalog/catalog.module';
+import { CofounderPayModule } from './modules/cofounder/cofounder-pay.module';
+import { CofounderModule } from './modules/cofounder/cofounder.module';
 import { CmsModule } from './modules/cms/cms.module';
 import { HealthModule } from './modules/health/health.module';
 import { AdminModule } from './modules/admin/admin.module';
@@ -34,6 +36,8 @@ import { WalletModule } from './modules/wallet/wallet.module';
     CmsModule,
     RewardsModule,
     SettingsModule,
+    CofounderModule,
+    CofounderPayModule,
   ],
 })
 export class AppModule {}

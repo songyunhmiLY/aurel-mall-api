@@ -47,6 +47,8 @@ function env(allowClockOverride: boolean): AppEnv {
       redPacketRoundPayThresholdFen: 0,
       redPacketRoundClaimCapFen: 0,
       cofounderDividendRatioBps: 0,
+      cofounderStartupDividendRatioBps: 0,
+      cofounderMallDividendRatioBps: 0,
       studioDividendRatioBps: 0,
       operationsTeamDividendRatioBps: 0,
       withdrawalFeeFen: 0,
