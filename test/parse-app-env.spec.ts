@@ -18,17 +18,33 @@ describe('locked runtime config', () => {
     expect(env.adminBootstrapPassword).toBeNull();
     expect(env.wechatPayNotifyUrl).toBeNull();
     expect(env.port).toBe(3000);
-    expect(env.marketingManagerMarketThresholdDefault).toBe('10000');
+    expect(env.marketingManagerMarketThresholdDefault).toBe('2000000');
     expect(env.locked.startupZoneUnitPriceFen).toBe(100_000);
+    expect(env.locked.filingWithdrawalRatioBps).toBe(2000);
+    expect(env.locked.filingDailyCheckTime).toBe('00:01');
+    expect(env.locked.startupSalesRatioBps).toBe(500);
+    expect(env.locked.startupPointRatioBps).toBe(200);
+    expect(env.locked.startupAwardSplit).toEqual({
+      withdrawableBps: 8500,
+      pointsBps: 500,
+      consumptionBps: 1000,
+    });
+    expect(env.locked.mallAwardSplit).toEqual({
+      withdrawableBps: 8500,
+      pointsBps: 1000,
+      consumptionBps: 500,
+    });
     expect(env.locked.redPacketRoundPayThresholdFen).toBe(500_000);
     expect(env.locked.redPacketRoundClaimCapFen).toBe(800_000);
-    expect(env.locked.positionDividendShareTiers.map((tier) => tier.positionCode)).toEqual([
-      'leader',
-      'manager',
+    expect(env.locked.positionDividendPools.map((tier) => tier.positionCode)).toEqual([
+      'marketing_manager',
+      'senior_manager',
       'director',
+      'senior_director',
+      'chief',
     ]);
     expect(Object.isFrozen(env.locked)).toBe(true);
-    expect(Object.isFrozen(env.locked.startupSalesAward)).toBe(true);
+    expect(Object.isFrozen(env.locked.startupAwardSplit)).toBe(true);
     expect(() => {
       env.locked.startupZoneUnitPriceFen = 1;
     }).toThrow(TypeError);
@@ -53,8 +69,14 @@ describe('locked runtime config', () => {
   });
 
   it('rejects a wallet split that does not add up to 10000', () => {
-    expect(() => parseAppEnv({ ...example, STARTUP_SALES_AWARD_WITHDRAWABLE_BPS: '2000' })).toThrow(
-      /STARTUP_SALES_AWARD/,
+    expect(() => parseAppEnv({ ...example, STARTUP_AWARD_WITHDRAWABLE_BPS: '2000' })).toThrow(
+      /STARTUP_AWARD/,
+    );
+  });
+
+  it('rejects a filing check time that is not HH:mm', () => {
+    expect(() => parseAppEnv({ ...example, FILING_DAILY_CHECK_TIME: '24:00' })).toThrow(
+      /FILING_DAILY_CHECK_TIME/,
     );
   });
 
@@ -88,7 +110,10 @@ describe('locked runtime config', () => {
 
   it('rejects duplicate position codes', () => {
     expect(() =>
-      parseAppEnv({ ...example, POSITION_DIVIDEND_SHARE_TIERS: 'leader:1,leader:2' }),
+      parseAppEnv({
+        ...example,
+        POSITION_DIVIDEND_POOL_BPS: 'marketing_manager:800,marketing_manager:600',
+      }),
     ).toThrow(/重复/);
   });
 });

@@ -27,22 +27,84 @@ model MarketTreeNode {
   @@map("market_tree_nodes")
 }
 
-/// 报单占位。status: draft / submitted / settled / void。
-model Filing {
+/// 创业专区已支付的报单资格。每件商品的每 1 个数量、且单价等于当时的 N，写一行。
+/// 用户不能操作报单。orderAt 是订单下单时间，每日检查按它和 id 决定先后。
+model StartupSubOrder {
   id        BigInt    @id @default(autoincrement())
-  filingNo  String    @unique(map: "filings_filing_no_uq") @map("filing_no") @db.VarChar(32)
+  orderId   BigInt    @map("order_id")
   userId    BigInt    @map("user_id")
-  orderId   BigInt?   @map("order_id")
-  status    String    @db.VarChar(32)
+  orderAt   DateTime  @map("order_at") @db.DateTime(3)
+  paidAt    DateTime  @map("paid_at") @db.DateTime(3)
   amountFen Int       @map("amount_fen")
   filedAt   DateTime? @map("filed_at") @db.DateTime(3)
-  settledAt DateTime? @map("settled_at") @db.DateTime(3)
   createdAt DateTime  @map("created_at") @db.DateTime(3)
-  updatedAt DateTime  @map("updated_at") @db.DateTime(3)
 
+  @@index([userId, filedAt], map: "startup_sub_orders_user_filed_idx")
+  @@index([orderId], map: "startup_sub_orders_order_id_idx")
+  @@index([orderAt], map: "startup_sub_orders_order_at_idx")
+  @@map("startup_sub_orders")
+}
+
+/// 全网公排。status: filed / settled。
+/// sequence 是完成报单时的全局序号，从 1 递增。同一用户每个上海自然日最多一行。
+/// settled 表示这一单作为第 k 单领到了幸运返还，不是“第 5k 单触发时把自己标成已结算”。
+model Filing {
+  id         BigInt    @id @default(autoincrement())
+  filingNo   String    @unique(map: "filings_filing_no_uq") @map("filing_no") @db.VarChar(32)
+  userId     BigInt    @map("user_id")
+  orderId    BigInt?   @map("order_id")
+  subOrderId BigInt?   @unique(map: "filings_sub_order_id_uq") @map("sub_order_id")
+  sequence   Int?      @unique(map: "filings_sequence_uq")
+  /// 完成报单的上海自然日 YYYY-MM-DD。
+  bizDate    String?   @map("biz_date") @db.Char(10)
+  status     String    @db.VarChar(32)
+  amountFen  Int       @map("amount_fen")
+  filedAt    DateTime? @map("filed_at") @db.DateTime(3)
+  settledAt  DateTime? @map("settled_at") @db.DateTime(3)
+  createdAt  DateTime  @map("created_at") @db.DateTime(3)
+  updatedAt  DateTime  @map("updated_at") @db.DateTime(3)
+
+  @@unique([userId, bizDate], map: "filings_user_biz_date_uq")
   @@index([userId, filedAt], map: "filings_user_id_filed_at_idx")
   @@index([orderId], map: "filings_order_id_idx")
   @@map("filings")
+}
+
+/// 公排序号。slot 固定为 1，分配序号前锁这一行。
+model FilingCounter {
+  id           BigInt   @id @default(autoincrement())
+  slot         Int      @unique(map: "filing_counters_slot_uq")
+  lastSequence Int      @map("last_sequence")
+  updatedAt    DateTime @map("updated_at") @db.DateTime(3)
+
+  @@map("filing_counters")
+}
+
+/// 某个上海自然日的报单检查。finishedAt 为空表示还没跑完，可以接着跑。
+model FilingDailyCheck {
+  id         BigInt    @id @default(autoincrement())
+  bizDate    String    @unique(map: "filing_daily_checks_biz_date_uq") @map("biz_date") @db.Char(10)
+  finishedAt DateTime? @map("finished_at") @db.DateTime(3)
+  createdAt  DateTime  @map("created_at") @db.DateTime(3)
+
+  @@map("filing_daily_checks")
+}
+
+/// 序号 5k 完成时，给序号 k 的报单入账。每个受益报单最多一行。
+model FilingSettlement {
+  id                  BigInt   @id @default(autoincrement())
+  triggerSequence     Int      @unique(map: "filing_settlements_trigger_sequence_uq") @map("trigger_sequence")
+  beneficiaryFilingId BigInt   @unique(map: "filing_settlements_beneficiary_uq") @map("beneficiary_filing_id")
+  beneficiaryUserId   BigInt   @map("beneficiary_user_id")
+  pointsFen           BigInt   @map("points_fen")
+  withdrawableFen     BigInt   @map("withdrawable_fen")
+  unitPriceFen        Int      @map("unit_price_fen")
+  withdrawalRatioBps  Int      @map("withdrawal_ratio_bps")
+  settledAt           DateTime @map("settled_at") @db.DateTime(3)
+  createdAt           DateTime @map("created_at") @db.DateTime(3)
+
+  @@index([beneficiaryUserId], map: "filing_settlements_user_idx")
+  @@map("filing_settlements")
 }
 
 /// rewardType 预留 startup_sales / startup_points / mall_sales / mall_points / position_dividend / cofounder / studio / operations / red_packet。
@@ -55,16 +117,24 @@ model RewardLedgerEntry {
   status     String   @db.VarChar(32)
   bizType    String   @map("biz_type") @db.VarChar(64)
   bizId      String   @map("biz_id") @db.VarChar(64)
+  /// 产生这笔奖励的订单。报单结算和职位分红为空。
+  orderId    BigInt?  @map("order_id")
+  /// 见点或销售奖的层。销售奖记 1（直接邀请人）。与订单无关的奖励为空。
+  layer      Int?
   occurredAt DateTime @map("occurred_at") @db.DateTime(3)
   createdAt  DateTime @map("created_at") @db.DateTime(3)
 
+  @@unique([userId, rewardType, bizType, bizId], map: "reward_ledger_biz_uq")
   @@index([userId, occurredAt], map: "reward_ledger_user_occurred_idx")
   @@index([rewardType, occurredAt], map: "reward_ledger_type_occurred_idx")
   @@index([bizType, bizId], map: "reward_ledger_biz_idx")
+  @@index([orderId, rewardType], map: "reward_ledger_order_type_idx")
+  @@index([userId, rewardType, layer], map: "reward_ledger_user_type_layer_idx")
   @@map("reward_ledger_entries")
 }
 
-/// 职位名录。分红份额不在本表，而在锁定环境变量 POSITION_DIVIDEND_SHARE_TIERS，按 code 逻辑对应。
+/// 职位名录。池子比例在锁定环境变量 POSITION_DIVIDEND_POOL_BPS，按 code 对应。
+/// 任职按自然月计算，不写永久任职。user_positions 仍只是预留。
 model Position {
   id        BigInt   @id @default(autoincrement())
   code      String   @unique(map: "positions_code_uq") @db.VarChar(32)

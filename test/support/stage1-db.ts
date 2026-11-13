@@ -10,7 +10,12 @@ interface TxScope {
 
 interface Filter {
   in?: unknown[];
+  notIn?: unknown[];
   contains?: string;
+  gte?: unknown;
+  gt?: unknown;
+  lte?: unknown;
+  lt?: unknown;
 }
 
 function coded(code: string): Error & { code: string } {
@@ -30,13 +35,14 @@ function same(left: unknown, right: unknown): boolean {
 }
 
 function isFilter(value: unknown): value is Filter {
-  return (
-    value !== null &&
-    typeof value === 'object' &&
-    !(value instanceof Date) &&
-    typeof value !== 'bigint' &&
-    ('in' in value || 'contains' in value)
-  );
+  if (value === null || typeof value !== 'object' || value instanceof Date) {
+    return false;
+  }
+  const keys = Object.keys(value);
+  if (keys.length === 0) {
+    return false;
+  }
+  return keys.every((key) => ['in', 'notIn', 'contains', 'gte', 'gt', 'lte', 'lt'].includes(key));
 }
 
 function matches(row: Row, where: Record<string, unknown> | undefined): boolean {
@@ -56,10 +62,25 @@ function matches(row: Row, where: Record<string, unknown> | undefined): boolean 
       if (expected.in && !expected.in.some((item) => same(actual, item))) {
         return false;
       }
+      if (expected.notIn && expected.notIn.some((item) => same(actual, item))) {
+        return false;
+      }
       if (
         expected.contains !== undefined &&
         (typeof actual !== 'string' || !actual.includes(expected.contains))
       ) {
+        return false;
+      }
+      if (expected.gte !== undefined && !compareBound(actual, expected.gte, 'gte')) {
+        return false;
+      }
+      if (expected.gt !== undefined && !compareBound(actual, expected.gt, 'gt')) {
+        return false;
+      }
+      if (expected.lte !== undefined && !compareBound(actual, expected.lte, 'lte')) {
+        return false;
+      }
+      if (expected.lt !== undefined && !compareBound(actual, expected.lt, 'lt')) {
         return false;
       }
       continue;
@@ -69,6 +90,34 @@ function matches(row: Row, where: Record<string, unknown> | undefined): boolean 
     }
   }
   return true;
+}
+
+function compareBound(actual: unknown, bound: unknown, op: 'gte' | 'gt' | 'lte' | 'lt'): boolean {
+  if (actual === null || actual === undefined || bound === null || bound === undefined) {
+    return false;
+  }
+  let delta = 0;
+  if (actual instanceof Date && bound instanceof Date) {
+    delta = actual.getTime() - bound.getTime();
+  } else if (typeof actual === 'bigint' && typeof bound === 'bigint') {
+    delta = actual < bound ? -1 : actual > bound ? 1 : 0;
+  } else if (typeof actual === 'number' && typeof bound === 'number') {
+    delta = actual - bound;
+  } else if (typeof actual === 'string' && typeof bound === 'string') {
+    delta = actual < bound ? -1 : actual > bound ? 1 : 0;
+  } else {
+    return false;
+  }
+  if (op === 'gte') {
+    return delta >= 0;
+  }
+  if (op === 'gt') {
+    return delta > 0;
+  }
+  if (op === 'lte') {
+    return delta <= 0;
+  }
+  return delta < 0;
 }
 
 function cloneRow(row: Row): Row {
@@ -120,8 +169,8 @@ class MemoryTable {
     return cloneRowOrNull(this.rows.find((row) => matches(row, args.where)) ?? null);
   }
 
-  findFirst(args: { where?: Record<string, unknown>; orderBy?: unknown }): Row | null {
-    const rows = this.filtered(args.where, args.orderBy);
+  findFirst(args?: { where?: Record<string, unknown>; orderBy?: unknown }): Row | null {
+    const rows = this.filtered(args?.where, args?.orderBy);
     return cloneRowOrNull(rows[0] ?? null);
   }
 
@@ -275,6 +324,7 @@ export class Stage1Db {
   private readonly userLockTail = new Map<string, Promise<void>>();
 
   readonly user = new MemoryTable([['inviteCode']]);
+  readonly adminSetting = new MemoryTable([['settingKey']]);
   readonly userIdentity = new MemoryTable([['provider', 'identifier']]);
   readonly userKyc = new MemoryTable([['userId']]);
   readonly userAddress = new MemoryTable([]);
@@ -289,7 +339,9 @@ export class Stage1Db {
   readonly orderItem = new MemoryTable([]);
   readonly payment = new MemoryTable([['payNo'], ['channelTradeNo'], ['activeSlot']]);
   readonly walletAccount = new MemoryTable([['userId', 'walletType']]);
-  readonly walletLedgerEntry = new MemoryTable([]);
+  readonly walletLedgerEntry = new MemoryTable([
+    ['userId', 'walletType', 'direction', 'bizType', 'bizId'],
+  ]);
   readonly walletHold = new MemoryTable([['orderId', 'walletType']]);
   readonly consumptionTransfer = new MemoryTable([]);
   readonly userPaymentPassword = new MemoryTable([['userId']]);
@@ -299,7 +351,22 @@ export class Stage1Db {
   readonly withdrawalDisplaySource = new MemoryTable([['sourceCode']]);
   readonly cashLedgerEntry = new MemoryTable([]);
   readonly orderRefund = new MemoryTable([['wechatRefundNo']]);
-  readonly rewardLedgerEntry = new MemoryTable([]);
+  readonly rewardLedgerEntry = new MemoryTable([['userId', 'rewardType', 'bizType', 'bizId']]);
+  readonly startupSubOrder = new MemoryTable([]);
+  readonly filing = new MemoryTable([
+    ['filingNo'],
+    ['subOrderId'],
+    ['sequence'],
+    ['userId', 'bizDate'],
+  ]);
+  readonly filingCounter = new MemoryTable([['slot']]);
+  readonly filingDailyCheck = new MemoryTable([['bizDate']]);
+  readonly filingSettlement = new MemoryTable([['triggerSequence'], ['beneficiaryFilingId']]);
+  readonly marketThresholdRevision = new MemoryTable([['effectiveMonth']]);
+  readonly position = new MemoryTable([['code']]);
+  readonly positionDividendPeriod = new MemoryTable([['performanceMonth']]);
+  readonly positionDividendExclusion = new MemoryTable([['periodId', 'userId']]);
+  readonly positionDividendRecord = new MemoryTable([['periodId', 'userId', 'positionCode']]);
 
   async $queryRaw(
     strings: TemplateStringsArray,
@@ -409,6 +476,7 @@ export class Stage1Db {
   private tables(): MemoryTable[] {
     return [
       this.user,
+      this.adminSetting,
       this.userIdentity,
       this.userKyc,
       this.userAddress,
@@ -434,6 +502,16 @@ export class Stage1Db {
       this.cashLedgerEntry,
       this.orderRefund,
       this.rewardLedgerEntry,
+      this.startupSubOrder,
+      this.filing,
+      this.filingCounter,
+      this.filingDailyCheck,
+      this.filingSettlement,
+      this.marketThresholdRevision,
+      this.position,
+      this.positionDividendPeriod,
+      this.positionDividendExclusion,
+      this.positionDividendRecord,
     ];
   }
 }
