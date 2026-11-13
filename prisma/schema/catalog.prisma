@@ -61,7 +61,7 @@ model ProductSku {
   @@map("product_skus")
 }
 
-/// 与 SKU 逻辑上一对一，skuId 唯一索引，没有外键。本阶段只允许管理端设置数量，不扣库存。
+/// 与 SKU 逻辑上一对一，skuId 唯一索引，没有外键。支付成功时扣减 quantity。
 model SkuStock {
   id        BigInt   @id @default(autoincrement())
   skuId     BigInt   @unique(map: "sku_stocks_sku_id_uq") @map("sku_id")

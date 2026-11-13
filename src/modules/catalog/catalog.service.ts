@@ -126,7 +126,7 @@ interface ResolvedCommerce {
 
 /**
  * 每个商品恰好一个 SKU。用户接口只返回上架商品。
- * 会员商城还要求市场树席位。本阶段不扣库存，也不创建订单。
+ * 会员商城还要求用户行上的会员标记。库存由订单在支付成功时扣减。
  */
 @Injectable()
 export class CatalogService {

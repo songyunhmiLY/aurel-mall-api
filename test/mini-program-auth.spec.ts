@@ -147,5 +147,13 @@ describe('mini program login and preview auth', () => {
     expect(buyer.user.member).toBe(false);
     expect(db.marketTreeNode.rows).toHaveLength(1);
     expect(db.user.rows.filter((row) => row.inviteCode === ROOT_INVITE_CODE)).toHaveLength(1);
+
+    await db.user.update({
+      where: { id: root.id },
+      data: { inviteCode: 'ROOT' },
+    });
+    await users.onModuleInit();
+    expect(db.user.rows.find((row) => row.id === root.id)?.inviteCode).toBe('000000');
+    expect(db.user.rows.filter((row) => row.inviteCode === 'ROOT')).toHaveLength(0);
   });
 });

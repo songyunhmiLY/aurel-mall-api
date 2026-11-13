@@ -22,7 +22,7 @@
 
 `admin_settings` 只放管理员可改的配置（营销经理市场门槛 T，以及微信支付商户号、API 证书、APIv3 密钥）。锁定配置不进这张表。证书放在 `TEXT` 字段里。
 
-`users.phone` 是微信手机号组件绑定的号码，可空、不唯一。`users.invite_code` 本阶段只有根账户会写，值为 `ROOT`。`user_kyc` 保存姓名、身份证号和手机号；格式通过后 `status = verified`。
+`users.phone` 是微信手机号组件绑定的号码，可空、不唯一。`users.invite_code` 根账户固定为 `000000`。其他用户在第一次入座前为空，入座时写入另外的 6 位数字码，不会使用 `000000`。`users.member` 和 `users.seated` 表示已经有市场席位，入座时一起写成 true。`user_kyc` 保存姓名、身份证号和手机号；格式通过后 `status = verified`。
 
 ```mermaid
 erDiagram
@@ -37,6 +37,8 @@ erDiagram
     varchar nickname
     varchar phone
     varchar invite_code UK
+    boolean member
+    boolean seated
     datetime created_at
     datetime updated_at
   }
@@ -124,7 +126,7 @@ erDiagram
 
 ## 3. 订单与支付
 
-`payments.channel = wechat` 时走微信支付下单和回调。状态是 `pending` / `success` / `failed`。`placed_at` / `paid_at` / `succeeded_at` 都由时钟写入。账户划扣和资金路径合规不在这张表里。
+`payments.channel = wechat` 时走微信支付下单和回调。状态是 `pending` / `success` / `failed`。金额是订单拆分后的 `wechat_fen`，不是整个应付。`placed_at` / `paid_at` / `shipped_at` / `succeeded_at` 都由时钟写入。积分、可提现、消费的占用和扣款记在订单列和钱包表上。
 
 ```mermaid
 erDiagram
@@ -140,8 +142,17 @@ erDiagram
     varchar zone
     varchar status
     int pay_amount_fen
+    int freight_fen
+    int pv_fen
+    int points_fen
+    int withdrawable_fen
+    int consumption_fen
+    int wechat_fen
+    varchar contact_name
+    varchar tracking_no
     datetime placed_at
     datetime paid_at
+    datetime shipped_at
   }
   order_items {
     bigint id PK
@@ -167,11 +178,12 @@ erDiagram
 
 ## 4. 钱包流水
 
-账户类型预留 `withdrawable`（可提现余额）和 `points`（积分），与锁定配置里的拆分目标一致。同一用户每种类型一行。
+账户类型是 `points`（积分）、`withdrawable`（可提现）和 `consumption`（消费）。同一用户每种类型一行。`frozen_fen` 是待微信支付确认的占用。`wallet_holds.status` 是 `held` / `captured` / `released`。
 
 ```mermaid
 erDiagram
   users ||--o{ wallet_accounts : "user_id"
+  users ||--o{ wallet_holds : "user_id"
   wallet_accounts ||--o{ wallet_ledger_entries : "account_id"
 
   wallet_accounts {
@@ -179,6 +191,14 @@ erDiagram
     bigint user_id
     varchar wallet_type
     bigint balance_fen
+    bigint frozen_fen
+  }
+  wallet_holds {
+    bigint id PK
+    bigint order_id
+    varchar wallet_type
+    bigint amount_fen
+    varchar status
   }
   wallet_ledger_entries {
     bigint id PK
@@ -224,7 +244,7 @@ erDiagram
 
 ## 6. 邀请树、市场树、报单、奖励、职位
 
-两棵树分开存。启动时只为官方根账户各写一行：`parent_user_id` 为空，`depth` 为 0。其他用户的安置算法还没实现。有市场树席位才是会员。职位分红**份额**不在 `positions` 表里，而在环境变量 `POSITION_DIVIDEND_SHARE_TIERS`，用 `positions.code` 做逻辑对应。
+两棵树分开存。启动时只为官方根账户各写一行：`parent_user_id` 为空，`depth` 为 0。其他用户注册后只进邀请树；创业专区支付成功后，从邀请人的席位按每层最多 3 个下级入座。有市场席位才是会员，并写回 `users.member` / `users.seated`。职位分红**份额**不在 `positions` 表里，而在环境变量 `POSITION_DIVIDEND_SHARE_TIERS`，用 `positions.code` 做逻辑对应。
 
 ```mermaid
 erDiagram

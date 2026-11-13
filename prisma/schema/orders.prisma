@@ -1,20 +1,39 @@
-/// status: pending_payment / paid / closed。zone 与商品专区编码一致。时间由应用写入。
+/// status: pending_payment / paid / shipped / closed。zone 与商品专区编码一致。
+/// 金额单位为分。账户拆分在发起支付时写入；未拆分前四个来源都是 0。
+/// 收货信息是下单时的地址快照。时间由应用写入。
 model Order {
-  id            BigInt    @id @default(autoincrement())
-  orderNo       String    @unique(map: "orders_order_no_uq") @map("order_no") @db.VarChar(32)
-  userId        BigInt    @map("user_id")
-  zone          String    @db.VarChar(32)
-  status        String    @db.VarChar(32)
-  goodsTotalFen Int       @map("goods_total_fen")
-  payAmountFen  Int       @map("pay_amount_fen")
-  placedAt      DateTime  @map("placed_at") @db.DateTime(3)
-  paidAt        DateTime? @map("paid_at") @db.DateTime(3)
-  closedAt      DateTime? @map("closed_at") @db.DateTime(3)
-  createdAt     DateTime  @map("created_at") @db.DateTime(3)
-  updatedAt     DateTime  @map("updated_at") @db.DateTime(3)
+  id               BigInt    @id @default(autoincrement())
+  orderNo          String    @unique(map: "orders_order_no_uq") @map("order_no") @db.VarChar(32)
+  userId           BigInt    @map("user_id")
+  zone             String    @db.VarChar(32)
+  status           String    @db.VarChar(32)
+  goodsTotalFen    Int       @map("goods_total_fen")
+  freightFen       Int       @map("freight_fen")
+  payAmountFen     Int       @map("pay_amount_fen")
+  /// 订单 PV，商城为各行单价 PV × 数量之和。创业专区为 0。不是售价。
+  pvFen            Int       @map("pv_fen")
+  pointsFen        Int       @map("points_fen")
+  withdrawableFen  Int       @map("withdrawable_fen")
+  consumptionFen   Int       @map("consumption_fen")
+  wechatFen        Int       @map("wechat_fen")
+  contactName      String    @map("contact_name") @db.VarChar(64)
+  contactPhone     String    @map("contact_phone") @db.VarChar(32)
+  province         String    @db.VarChar(32)
+  city             String    @db.VarChar(32)
+  district         String    @db.VarChar(32)
+  detail           String    @db.VarChar(255)
+  courierName      String?   @map("courier_name") @db.VarChar(64)
+  trackingNo       String?   @map("tracking_no") @db.VarChar(64)
+  placedAt         DateTime  @map("placed_at") @db.DateTime(3)
+  paidAt           DateTime? @map("paid_at") @db.DateTime(3)
+  shippedAt        DateTime? @map("shipped_at") @db.DateTime(3)
+  closedAt         DateTime? @map("closed_at") @db.DateTime(3)
+  createdAt        DateTime  @map("created_at") @db.DateTime(3)
+  updatedAt        DateTime  @map("updated_at") @db.DateTime(3)
 
   @@index([userId, placedAt], map: "orders_user_id_placed_at_idx")
   @@index([status], map: "orders_status_idx")
+  @@index([zone, status], map: "orders_zone_status_idx")
   @@map("orders")
 }
 
@@ -25,6 +44,10 @@ model OrderItem {
   productName  String   @map("product_name") @db.VarChar(128)
   skuName      String   @map("sku_name") @db.VarChar(128)
   unitPriceFen Int      @map("unit_price_fen")
+  /// 单价 PV。创业专区为 0。行 PV = pv_fen × quantity。
+  pvFen        Int      @map("pv_fen")
+  /// 商品运费单价。行运费 = freight_fen × quantity。
+  freightFen   Int      @map("freight_fen")
   quantity     Int
   lineTotalFen Int      @map("line_total_fen")
   createdAt    DateTime @map("created_at") @db.DateTime(3)

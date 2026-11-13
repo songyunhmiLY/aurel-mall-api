@@ -124,13 +124,9 @@ export class AdminUsersService {
       return [];
     }
     const ids = users.map((user) => user.id);
-    const [seats, kycRows] = await Promise.all([
-      this.prisma.marketTreeNode.findMany({ where: { userId: { in: ids } } }),
-      this.prisma.userKyc.findMany({
-        where: { userId: { in: ids }, status: KYC_STATUS_VERIFIED },
-      }),
-    ]);
-    const members = new Set(seats.map((seat) => seat.userId.toString()));
+    const kycRows = await this.prisma.userKyc.findMany({
+      where: { userId: { in: ids }, status: KYC_STATUS_VERIFIED },
+    });
     const verified = new Set(kycRows.map((row) => row.userId.toString()));
     return users.map((user) => ({
       id: user.id,
@@ -139,7 +135,7 @@ export class AdminUsersService {
       avatarUrl: user.avatarUrl,
       phone: user.phone,
       inviteCode: user.inviteCode,
-      member: members.has(user.id.toString()),
+      member: user.member,
       kycVerified: verified.has(user.id.toString()),
       createdAt: user.createdAt.toISOString(),
       updatedAt: user.updatedAt.toISOString(),

@@ -1,5 +1,5 @@
 /// 邀请树。parentUserId 为空表示根。
-/// 启动时只为官方根账户写一行（depth 0）。其他用户的安置算法未实现。
+/// 填写邀请码时写入上级。市场席位要等创业专区支付成功后另写，且不会改这里的上级。
 model InviteTreeNode {
   id           BigInt   @id @default(autoincrement())
   userId       BigInt   @unique(map: "invite_tree_user_id_uq") @map("user_id")
@@ -13,7 +13,8 @@ model InviteTreeNode {
 }
 
 /// 市场树，与邀请树分开存储。有席位即会员。
-/// 启动时只为官方根账户写一行。其他用户的安置算法未实现。
+/// 每个节点最多 3 个下级。左右顺序用 placedAt（相同则用 id），不另存左中右字段。
+/// 启动时只为官方根账户写一行。其他用户在创业专区支付成功后入座。
 model MarketTreeNode {
   id           BigInt   @id @default(autoincrement())
   userId       BigInt   @unique(map: "market_tree_user_id_uq") @map("user_id")

@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Inject,
   Injectable,
@@ -16,6 +17,7 @@ import type { AppEnv } from '../../config/app-env';
 import { APP_ENV } from '../../config/tokens';
 import {
   IDENTITY_PROVIDERS,
+  LEGACY_ROOT_INVITE_CODE,
   ROOT_IDENTITY_IDENTIFIER,
   ROOT_INVITE_CODE,
   ROOT_NICKNAME,
@@ -42,8 +44,9 @@ export interface UserSessionResult {
 const PREVIEW_SUBJECT = /^[A-Za-z0-9._-]{1,64}$/;
 
 /**
- * 小程序登录、开发预览登录、手机号绑定，以及官方根账户。
- * 会员 = 市场树有席位。本阶段只预置根账户，不给其他用户安置席位。
+ * 小程序登录、开发预览登录、手机号绑定、邀请码登记，以及官方根账户。
+ * 登录不接收邀请码。邀请上级只在 bindInviter 写一次，入座不会改它。
+ * 会员 = 用户行上的 member 标记，入座时和席位、邀请码一起写入。
  */
 @Injectable()
 export class UsersService implements OnModuleInit {
@@ -60,6 +63,7 @@ export class UsersService implements OnModuleInit {
   async onModuleInit(): Promise<void> {
     const existing = await this.findRootIdentity();
     if (existing) {
+      await this.renameLegacyRootInviteCode(existing.userId);
       this.logger.log('system root account already exists');
       return;
     }
@@ -73,6 +77,8 @@ export class UsersService implements OnModuleInit {
             avatarUrl: null,
             phone: null,
             inviteCode: ROOT_INVITE_CODE,
+            member: true,
+            seated: true,
             createdAt: now,
             updatedAt: now,
           },
@@ -118,10 +124,89 @@ export class UsersService implements OnModuleInit {
     this.logger.log('bootstrapped system root account');
   }
 
-  /** 有市场树席位才是会员。根账户启动时已入座，其他用户本阶段不会入座。 */
+  /** 已落库的根邀请码 ROOT 改成 000000。000000 只属于根账户。 */
+  private async renameLegacyRootInviteCode(userId: bigint): Promise<void> {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user || user.inviteCode !== LEGACY_ROOT_INVITE_CODE) {
+      return;
+    }
+    const now = await this.clock.now();
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { inviteCode: ROOT_INVITE_CODE, updatedAt: now },
+    });
+  }
+
+  /**
+   * 用已有会员的邀请码写邀请上级。不写席位，也不改已经存在的上级。
+   * 邀请人必须是未停用的会员。根账户不走这里。
+   */
+  async bindInviter(
+    userId: bigint,
+    inviteCode: string,
+  ): Promise<{
+    inviteCode: string;
+    inviterId: bigint;
+  }> {
+    const code = inviteCode.trim();
+    if (!/^\d{6}$/.test(code)) {
+      throw new BadRequestException('邀请码不正确');
+    }
+    const now = await this.clock.now();
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        const user = await tx.user.findUnique({ where: { id: userId } });
+        if (!user || user.status !== USER_STATUS_ACTIVE) {
+          throw new UnauthorizedException('登录已失效');
+        }
+        const existing = await tx.inviteTreeNode.findUnique({ where: { userId } });
+        if (existing) {
+          throw new ConflictException('邀请关系已存在');
+        }
+        const inviter = await tx.user.findFirst({ where: { inviteCode: code } });
+        if (!inviter) {
+          throw new BadRequestException('邀请码不正确');
+        }
+        if (inviter.id === userId) {
+          throw new BadRequestException('不能填写自己的邀请码');
+        }
+        if (!inviter.member) {
+          throw new BadRequestException('非会员不能作为邀请人');
+        }
+        if (inviter.status !== USER_STATUS_ACTIVE) {
+          throw new BadRequestException('邀请人已停用');
+        }
+        const parent = await tx.inviteTreeNode.findUnique({ where: { userId: inviter.id } });
+        if (!parent) {
+          throw new BadRequestException('邀请码不正确');
+        }
+        const path = `${parent.path}${userId.toString()}/`;
+        if (path.length > 2048) {
+          throw new BadRequestException('邀请码不正确');
+        }
+        await tx.inviteTreeNode.create({
+          data: {
+            userId,
+            parentUserId: inviter.id,
+            depth: parent.depth + 1,
+            path,
+            joinedAt: now,
+          },
+        });
+        return { inviteCode: code, inviterId: inviter.id };
+      });
+    } catch (error) {
+      if (isUniqueConflict(error)) {
+        throw new ConflictException('邀请关系已存在');
+      }
+      throw error;
+    }
+  }
+
+  /** 读用户行上的会员标记。入座时会把它和 seated 一起写成 true。 */
   async isMember(userId: bigint): Promise<boolean> {
-    const seat = await this.prisma.marketTreeNode.findUnique({ where: { userId } });
-    return seat !== null;
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    return user?.member === true;
   }
 
   async loginWithMiniProgram(code: string): Promise<UserSessionResult> {
@@ -152,6 +237,8 @@ export class UsersService implements OnModuleInit {
             avatarUrl: null,
             phone: null,
             inviteCode: null,
+            member: false,
+            seated: false,
             createdAt: now,
             updatedAt: now,
           },
@@ -208,6 +295,8 @@ export class UsersService implements OnModuleInit {
             avatarUrl: null,
             phone: null,
             inviteCode: null,
+            member: false,
+            seated: false,
             createdAt: now,
             updatedAt: now,
           },

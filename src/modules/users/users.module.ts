@@ -4,6 +4,7 @@ import { ClockModule } from '../../common/clock/clock.module';
 import { AddressesController } from './addresses.controller';
 import { AddressesService } from './addresses.service';
 import { AuthController } from './auth.controller';
+import { InviterController } from './inviter.controller';
 import { KycController } from './kyc.controller';
 import { KycService } from './kyc.service';
 import { PreviewAuthEnabledGuard } from './preview-auth.guard';
@@ -12,7 +13,7 @@ import { WechatMiniClient } from './wechat-mini.client';
 
 @Module({
   imports: [AuthModule, ClockModule],
-  controllers: [AuthController, KycController, AddressesController],
+  controllers: [AuthController, InviterController, KycController, AddressesController],
   providers: [
     UsersService,
     KycService,
