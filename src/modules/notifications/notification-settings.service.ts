@@ -24,6 +24,12 @@ import {
   type DeliveryMode,
 } from './notifications.constants';
 
+export interface SubscribeTemplate {
+  event: NotifyEvent;
+  templateId: string;
+  page: string;
+}
+
 export interface NotifySlot {
   channel: 'wechat' | 'sms';
   slot: string;
@@ -117,6 +123,12 @@ export class NotificationSettingsService {
     return toRuntime(raw);
   }
 
+  /** 当前可向微信请求授权的订阅模板。推送方式不是微信时返回空列表。 */
+  async listSubscribeTemplates(): Promise<{ templates: SubscribeTemplate[] }> {
+    const runtime = await this.readForSend();
+    return { templates: requestableWechatTemplates(runtime) };
+  }
+
   async update(
     input: UpdateNotificationSettingsInput,
     adminUserId: bigint,
@@ -160,6 +172,25 @@ interface SettingRow {
   settingValue: string;
   updatedAt: Date;
   updatedByAdminId: bigint | null;
+}
+
+function requestableWechatTemplates(runtime: NotificationRuntime): SubscribeTemplate[] {
+  if (runtime.deliveryMode !== 'wechat' && runtime.deliveryMode !== 'both') {
+    return [];
+  }
+  const templates: SubscribeTemplate[] = [];
+  for (const event of NOTIFY_EVENTS) {
+    const config = runtime.events[event];
+    if (!config.enabled || !config.wechatTemplateId) {
+      continue;
+    }
+    templates.push({
+      event,
+      templateId: config.wechatTemplateId,
+      page: config.pagePath ?? DEFAULT_NOTIFY_PAGE,
+    });
+  }
+  return templates;
 }
 
 function toView(raw: Map<string, SettingRow>): NotificationSettingsView {

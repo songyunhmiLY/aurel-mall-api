@@ -5,12 +5,13 @@ import { PrismaNotificationDirectory } from './notification-directory';
 import { NotificationDispatchService } from './notification-dispatch.service';
 import { NotificationSettingsController } from './notification-settings.controller';
 import { NotificationSettingsService } from './notification-settings.service';
+import { NotificationSubscribeController } from './notification-subscribe.controller';
 import { TencentSmsClient } from './tencent-sms.client';
 import { WechatSubscribeClient } from './wechat-subscribe.client';
 
 @Module({
   imports: [AuthModule, ClockModule],
-  controllers: [NotificationSettingsController],
+  controllers: [NotificationSettingsController, NotificationSubscribeController],
   providers: [
     NotificationSettingsService,
     PrismaNotificationDirectory,
