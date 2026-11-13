@@ -274,6 +274,46 @@ export class Stage1Db {
   readonly skuStock = new MemoryTable([['skuId']]);
   readonly productImage = new MemoryTable([]);
   readonly mallCategory = new MemoryTable([]);
+  readonly order = new MemoryTable([['orderNo']]);
+  readonly orderItem = new MemoryTable([]);
+  readonly payment = new MemoryTable([['payNo'], ['channelTradeNo'], ['activeSlot']]);
+  readonly walletAccount = new MemoryTable([['userId', 'walletType']]);
+  readonly walletLedgerEntry = new MemoryTable([]);
+  readonly walletHold = new MemoryTable([['orderId', 'walletType']]);
+
+  async $queryRaw(
+    strings: TemplateStringsArray,
+    ...values: unknown[]
+  ): Promise<Record<string, unknown>[]> {
+    const sql = strings.join('?');
+    if (sql.includes('FROM payments')) {
+      const payNo = values[0];
+      const row = this.payment.rows.find((item) => item.payNo === payNo);
+      if (!row) {
+        return [];
+      }
+      return [
+        {
+          id: row.id,
+          orderId: row.orderId,
+          payNo: row.payNo,
+          channel: row.channel,
+          amountFen: row.amountFen,
+          status: row.status,
+          succeededAt: row.succeededAt ?? null,
+        },
+      ];
+    }
+    if (sql.includes('FROM orders')) {
+      const id = values[0];
+      const row = this.order.rows.find((item) => item.id === id);
+      if (!row) {
+        return [];
+      }
+      return [{ id: row.id, status: row.status }];
+    }
+    return [];
+  }
 
   async $transaction<T>(fn: (tx: Stage1Db) => Promise<T>): Promise<T> {
     const snapshot = this.snapshot();
@@ -309,6 +349,12 @@ export class Stage1Db {
       this.skuStock,
       this.productImage,
       this.mallCategory,
+      this.order,
+      this.orderItem,
+      this.payment,
+      this.walletAccount,
+      this.walletLedgerEntry,
+      this.walletHold,
     ];
   }
 }

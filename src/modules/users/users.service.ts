@@ -43,7 +43,7 @@ const PREVIEW_SUBJECT = /^[A-Za-z0-9._-]{1,64}$/;
 
 /**
  * 小程序登录、开发预览登录、手机号绑定，以及官方根账户。
- * 会员 = 市场树有席位。本阶段只预置根账户，不给其他用户安置席位。
+ * 会员 = 用户行上的 member 标记，入座时和席位一起写入。注册不入座。
  */
 @Injectable()
 export class UsersService implements OnModuleInit {
@@ -73,6 +73,8 @@ export class UsersService implements OnModuleInit {
             avatarUrl: null,
             phone: null,
             inviteCode: ROOT_INVITE_CODE,
+            member: true,
+            seated: true,
             createdAt: now,
             updatedAt: now,
           },
@@ -118,10 +120,10 @@ export class UsersService implements OnModuleInit {
     this.logger.log('bootstrapped system root account');
   }
 
-  /** 有市场树席位才是会员。根账户启动时已入座，其他用户本阶段不会入座。 */
+  /** 读用户行上的会员标记。入座时会把它和 seated 一起写成 true。 */
   async isMember(userId: bigint): Promise<boolean> {
-    const seat = await this.prisma.marketTreeNode.findUnique({ where: { userId } });
-    return seat !== null;
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    return user?.member === true;
   }
 
   async loginWithMiniProgram(code: string): Promise<UserSessionResult> {
@@ -152,6 +154,8 @@ export class UsersService implements OnModuleInit {
             avatarUrl: null,
             phone: null,
             inviteCode: null,
+            member: false,
+            seated: false,
             createdAt: now,
             updatedAt: now,
           },
@@ -208,6 +212,8 @@ export class UsersService implements OnModuleInit {
             avatarUrl: null,
             phone: null,
             inviteCode: null,
+            member: false,
+            seated: false,
             createdAt: now,
             updatedAt: now,
           },

@@ -2,9 +2,11 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  forwardRef,
   Inject,
   Injectable,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { randomBytes } from 'node:crypto';
 import { Prisma } from '@prisma/client';
@@ -21,10 +23,12 @@ import {
 import { WechatPaySettingsService } from './wechat-pay-settings.service';
 import { assertPaymentStatus, nextPaymentStatus } from './wechat-pay-state';
 import { WECHAT_PAY_CHANNEL, activePaymentSlot } from './wechat-pay.constants';
+import { OrderPaymentSettler } from '../orders/order-payment.settler';
 
 const MYSQL_SIGNED_BIGINT_MAX = 9223372036854775807n;
 const ORDER_PENDING_PAYMENT = 'pending_payment';
 const ORDER_PAID = 'paid';
+const ORDER_SHIPPED = 'shipped';
 
 export interface CreateWechatPrepayInput {
   orderId: string;
@@ -68,8 +72,8 @@ interface ApplyTradeInput {
 
 /**
  * 微信支付下单与回调状态机。
- * 商户资料未配齐时走模拟成功，配齐后只接受验签回调。
- * 账户冻结、划扣和资金路径合规不在本服务内。
+ * 商户资料未配齐时走模拟成功或模拟失败，配齐后只接受验签回调。
+ * 成功或失败后交给订单结算：扣已冻结的账户份额，或把冻结还回去。
  */
 @Injectable()
 export class WechatPayService {
@@ -79,6 +83,9 @@ export class WechatPayService {
     private readonly settings: WechatPaySettingsService,
     private readonly gateway: WechatPayGateway,
     @Inject(APP_ENV) private readonly env: AppEnv,
+    @Optional()
+    @Inject(forwardRef(() => OrderPaymentSettler))
+    private readonly settler?: OrderPaymentSettler,
   ) {}
 
   async createPrepay(input: CreateWechatPrepayInput): Promise<WechatPrepayView> {
@@ -95,10 +102,14 @@ export class WechatPayService {
     if (order.status !== ORDER_PENDING_PAYMENT) {
       throw new ConflictException('订单不在待支付状态');
     }
-    if (!Number.isInteger(order.payAmountFen) || order.payAmountFen <= 0) {
+    const chargeFen = resolveWechatChargeFen(order);
+    if (!Number.isInteger(chargeFen) || chargeFen < 0) {
       throw new BadRequestException('订单应付金额无效');
     }
-    const payment = await this.ensurePendingPayment(order.id, order.payAmountFen, now);
+    if (chargeFen === 0) {
+      throw new BadRequestException('订单尚未确定支付拆分');
+    }
+    const payment = await this.ensurePendingPayment(order.id, chargeFen, now);
     if (!credentials) {
       return {
         mode: 'sandbox',
@@ -176,6 +187,21 @@ export class WechatPayService {
     return this.applyTrade({
       payNo,
       tradeState: 'SUCCESS',
+      transactionId: null,
+      amountFen: null,
+      mchId: null,
+      expectedMchId: null,
+      requireTransactionId: false,
+    });
+  }
+
+  async simulateFailure(payNo: string): Promise<WechatPaymentResult> {
+    if (await this.settings.isConfigured()) {
+      throw new ForbiddenException('微信支付已配置，不能使用模拟失败');
+    }
+    return this.applyTrade({
+      payNo,
+      tradeState: 'PAYERROR',
       transactionId: null,
       amountFen: null,
       mchId: null,
@@ -290,6 +316,15 @@ export class WechatPayService {
         return toPaymentResult({ ...payment, amountFen, succeededAt }, order.status);
       }
       const becameSuccess = next === 'success';
+      const becameFailed = next === 'failed' && current === 'pending';
+      if (
+        becameSuccess &&
+        order.status !== ORDER_PENDING_PAYMENT &&
+        order.status !== ORDER_PAID &&
+        order.status !== ORDER_SHIPPED
+      ) {
+        throw new ConflictException('订单不在待支付状态');
+      }
       await tx.payment.update({
         where: { id: payment.id },
         data: {
@@ -302,11 +337,17 @@ export class WechatPayService {
       });
       let orderStatus = order.status;
       if (becameSuccess && order.status === ORDER_PENDING_PAYMENT) {
-        await tx.order.update({
-          where: { id: order.id },
-          data: { status: ORDER_PAID, paidAt: now, updatedAt: now },
-        });
-        orderStatus = ORDER_PAID;
+        if (this.settler) {
+          orderStatus = await this.settler.settleWechatSuccess(tx, order.id, now);
+        } else {
+          await tx.order.update({
+            where: { id: order.id },
+            data: { status: ORDER_PAID, paidAt: now, updatedAt: now },
+          });
+          orderStatus = ORDER_PAID;
+        }
+      } else if (becameFailed && this.settler) {
+        await this.settler.releaseWechatFailure(tx, order.id, now);
       }
       return toPaymentResult(
         {
@@ -438,6 +479,13 @@ function normalizeAmountFen(value: number | string): number {
     throw new BadRequestException('支付金额无效');
   }
   return amount;
+}
+
+function resolveWechatChargeFen(order: { payAmountFen: number; wechatFen?: number }): number {
+  if (typeof order.wechatFen === 'number') {
+    return order.wechatFen;
+  }
+  return order.payAmountFen;
 }
 
 function parseOrderId(value: string): bigint {

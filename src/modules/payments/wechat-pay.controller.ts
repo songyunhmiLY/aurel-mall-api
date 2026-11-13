@@ -23,6 +23,12 @@ export class WechatPayController {
     return this.payments.simulateSuccess(body.payNo);
   }
 
+  @Post('sandbox/fail')
+  @HttpCode(200)
+  sandboxFail(@Body() body: SandboxSucceedDto) {
+    return this.payments.simulateFailure(body.payNo);
+  }
+
   @Post('notify')
   async notify(@Req() req: RequestWithRawBody): Promise<RawHttpBody> {
     const raw = req.rawBody?.toString('utf8') ?? '';

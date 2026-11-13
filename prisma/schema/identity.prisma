@@ -9,6 +9,10 @@ model User {
   phone      String?  @db.VarChar(32)
   /// 本阶段只有系统根账户会写入邀请码。
   inviteCode String?  @unique(map: "users_invite_code_uq") @map("invite_code") @db.VarChar(32)
+  /// 有市场席位即为会员。与 seated 在同一次写入里维护，避免每次判断都查席位表。
+  member    Boolean
+  /// 已经写入市场席位。停用用户仍保持 true。
+  seated    Boolean
   createdAt DateTime @map("created_at") @db.DateTime(3)
   updatedAt DateTime @map("updated_at") @db.DateTime(3)
 

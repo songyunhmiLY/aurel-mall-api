@@ -1,6 +1,6 @@
 # 奥瑞尔经销商城 API
 
-经销商城后端。当前包含工程骨架、业务时钟、管理员登录、小程序登录、实名、收货地址、商品上下架，以及微信支付下单与回调。购物车、下单、支付扣款、提现、奖励结算和消息推送还没做。
+经销商城后端。当前包含工程骨架、业务时钟、管理员登录、小程序登录、实名、收货地址、商品上下架、订单支付、三个钱包账户、创业专区支付成功后的入座，以及微信支付下单与回调。购物车、商城退款、提现、奖励结算和消息推送还没做。
 
 同级仓库：
 
@@ -101,9 +101,9 @@ src/
     health/
     users/                # 小程序登录、根账户、实名、地址
     catalog/              # 创业专区与会员商城
-    orders/               # 订单占位
+    orders/               # 下单、支付拆分、发货
     payments/             # 微信支付下单、回调、商户配置
-    wallet/               # 钱包占位
+    wallet/               # 积分、可提现、消费账户
     cms/                  # Banner / 文章 / 滚动条占位
     rewards/              # 奖励，以及 trees、filing、positions、red-packet
     settings/             # 仅营销经理门槛 T
@@ -121,7 +121,7 @@ docs/er.md                # 逻辑 ER 图
 - 失败：HTTP 状态与 `code` 相同，`message` 为原因，`data` 一般为 `null`
 - 健康检查：`GET /api/v1/health`
 
-对外业务路由包括健康检查、时钟、管理员登录、小程序登录、实名、收货地址、商品，以及微信支付。购物车、下单、库存扣减和奖励结算还没有接口。JSON 里的 bigint 编号是十进制字符串。
+对外业务路由包括健康检查、时钟、管理员登录、小程序登录、实名、收货地址、商品、钱包余额、订单支付、发货，以及微信支付。购物车、商城退款、提现和奖励结算还没有接口。JSON 里的 bigint 编号和金额里的 bigint 都是十进制字符串。
 
 ## 认证
 
@@ -160,9 +160,9 @@ docs/er.md                # 逻辑 ER 图
 
 进程启动时，如果还没有官方根账户，就创建一次。它自动是会员，同时是邀请树和市场树的根，邀请码是 `ROOT`，不需要下单。不会用这种方式创建其他会员。其他用户要等以后创业专区购买成功后再入座。本阶段不实现安置算法。
 
-有市场树席位才是会员。根账户有席位。非会员可以浏览创业专区，调用会员商城列表或详情时返回 403，文案为「非会员不能浏览会员商城」。
+有市场席位才是会员。这个标记同时写在用户行的 `member` 和 `seated` 上，两者一起更新。根账户启动时就是会员。非会员可以浏览创业专区，调用会员商城列表或详情时返回 403，文案为「非会员不能浏览会员商城」。
 
-停用只把 `users.status` 改成 `disabled`，因此不能登录。不取消会员，也不删除市场树席位。
+停用只把 `users.status` 改成 `disabled`，因此不能登录。不取消会员，也不删除市场席位。`member` 和 `seated` 保持不变。
 
 ## 实名
 
@@ -191,7 +191,7 @@ docs/er.md                # 逻辑 ER 图
 
 ## 商品
 
-专区是 `startup`（创业专区）和 `mall`（会员商城）。每个商品恰好一个 SKU，没有款式。金额是分。状态是 `draft` / `on` / `off`。用户接口只返回 `on`。本阶段管理端可以设置库存，但不会因为下单去扣。没有购物车。
+专区是 `startup`（创业专区）和 `mall`（会员商城）。每个商品恰好一个 SKU，没有款式。金额是分。状态是 `draft` / `on` / `off`。用户接口只返回 `on`。支付成功时按购买数量扣库存；下单时库存不够会拒绝。没有购物车。
 
 创业专区售价固定为锁定单价 N（`STARTUP_ZONE_UNIT_PRICE_FEN`）。保存时写成 N。如果请求里的售价不是 N，仍然按 N 保存，并在 `warnings` 里说明。创业专区不使用 PV，提交 PV 会返回 400。
 
@@ -286,6 +286,108 @@ T **不是**锁定项。环境变量 `MARKETING_MANAGER_MARKET_THRESHOLD_DEFAULT
 - `GET /api/v1/admin/settings/marketing-manager-market-threshold`
 - `PUT /api/v1/admin/settings/marketing-manager-market-threshold`，body：`{ "value": "10000" }`
 
+## 钱包
+
+每个用户有三个账户：`points`（积分）、`withdrawable`（可提现）、`consumption`（消费）。余额单位是分。同一用户不能在这三个账户之间互转。本阶段没有转账、提现申请，也没有提现分类接口。
+
+需要用户令牌：
+
+- `GET /api/v1/me/wallets`
+
+`data` 为 `{ "points", "withdrawable", "consumption" }`。每个账户有 `balanceFen`、`frozenFen`、`availableFen`。可用额 = 余额 − 冻结。这三个数在 JSON 里是十进制字符串。还没有流水时三个账户都是 0。冻结只在订单已经占用、但微信支付还没成功时大于 0。
+
+扣款会写 `wallet_ledger_entries`：`direction` 为 `debit`，`bizType` 为 `order_payment`，`bizId` 是订单 id。冻结和释放不写流水，因为余额还没变。
+
+## 订单
+
+两个专区都要在下单时带一个已有收货地址。地址会抄进订单，之后改地址不影响已下的单。每个订单可以有多件商品，每件商品一个 SKU，只传数量。同一订单里商品不能重复。单次最多 50 种，每种数量 1 到 9999。
+
+行商品金额 = 单价 × 数量。行运费 = 商品 `freightFen` × 数量。行 PV = 单价 PV × 数量。订单商品金额、运费、应付、PV 分别是各行之和。应付 = 商品金额 + 运费。PV 不是售价。创业专区单价 PV 按 0 记，订单 PV 为 0。
+
+创业专区每件商品的单价是锁定单价 N。应付里的商品金额是 N 的整数倍。运费按商品上的 `freightFen` 另加，不另做地区运费。创业专区订单不能退款；本阶段也没有商城退款接口。
+
+会员商城只有会员能下单。非会员返回 403，文案为「非会员不能购买会员商城」。
+
+库存在支付成功时扣。下单时库存不够返回 409「库存不足」，不会生成订单。支付时如果库存已经被别人买完，同样返回「库存不足」，订单保持待支付，不扣款、不入座。
+
+需要用户令牌：
+
+- `GET /api/v1/orders?page=&pageSize=`
+- `GET /api/v1/orders/:id`
+- `POST /api/v1/orders`
+- `POST /api/v1/orders/:id/pay`
+- `POST /api/v1/orders/:id/cancel`
+- `POST /api/v1/orders/:id/timeout`
+
+下单 body：
+
+```json
+{
+  "zone": "startup",
+  "addressId": "1",
+  "items": [{ "productId": "2", "quantity": 1 }]
+}
+```
+
+`zone` 是 `startup` 或 `mall`。成功时 `data` 是订单。还没支付时四个来源金额都是 0，`status` 是 `pending_payment`。
+
+订单字段：`id`、`orderNo`、`userId`、`zone`、`status`、`goodsTotalFen`、`freightFen`、`payAmountFen`、`pvFen`、`pointsFen`、`withdrawableFen`、`consumptionFen`、`wechatFen`、`shipping`（`contactName`、`contactPhone`、`province`、`city`、`district`、`detail`）、`courierName`、`trackingNumber`、`items`、`placedAt`、`paidAt`、`shippedAt`、`closedAt`。
+
+行字段：`id`、`skuId`、`productName`、`skuName`、`unitPriceFen`、`unitPvFen`、`unitFreightFen`、`quantity`、`lineTotalFen`、`linePvFen`、`lineFreightFen`。
+
+状态：`pending_payment`、`paid`、`shipped`、`closed`。
+
+常见错误：
+
+- 400「专区不正确」「地址不正确」「请选择商品」「商品重复」「数量不正确」「商品专区不一致」「商品未上架」「创业专区商品售价不正确」「商品 PV 不正确」「订单金额超出范围」「缺少邀请关系」
+- 404「地址不存在」「商品不存在」「订单不存在」
+- 409「库存不足」「订单不在待支付状态」「余额不足」
+
+没入座的用户下创业专区订单时，必须已经有邀请上级。没有邀请关系返回 400「缺少邀请关系」。已经入座的用户再次购买不再检查邀请关系。登录接口仍然不接收邀请码；邀请上级写在 `invite_tree_nodes.parent_user_id`。
+
+### 支付顺序
+
+`POST /api/v1/orders/:id/pay` 的 body 可空。需要微信支付且商户资料已配齐时，带 `appId` 和 `openid`。`data` 是 `{ "order", "wechat" }`。账户够付时 `wechat` 为 `null`，订单直接变成 `paid`。否则 `wechat` 是下面的预下单结果，订单仍是 `pending_payment`。
+
+来源顺序不能由调用方调整，也不能跳过。
+
+创业专区：积分，然后可提现，然后微信。消费账户不参与。每个账户只能支付 N 的整数倍。可用额先取 `floor(可用余额 / N) × N`，再和剩余应付中同样对齐到 N 的部分取较小值。小于 N 的零头留在账户里。积分和可提现已经覆盖应付时，不发起微信支付。
+
+会员商城：消费账户（可以付任意余数），然后可提现（也可以付任意余数），然后微信。积分不参与。消费账户，或消费加可提现，已经覆盖应付时，不发起微信支付。
+
+需要微信支付时，先按上面的规则冻结积分、可提现或消费份额，再只为剩下的 `wechatFen` 下单。冻结期间余额不变，`frozenFen` 增加，可用额减少。微信成功之后才真正扣冻结的金额、扣库存，并把订单改成 `paid`。创业专区在同一次写入里入座。微信失败、用户取消或调用超时接口时，释放冻结，不扣余额，订单不完成。
+
+取消和超时都是 `POST`，没有 body。两者都只作用于仍待支付的订单：释放冻结，把未完成的微信支付单标为失败，订单改为 `closed`。本阶段没有按固定时长自动关单。失败后的订单如果仍是 `pending_payment`，可以再次调用支付；会按当时的可用余额重新计算拆分。
+
+支付成功后留有内部钩子，供以后的报单、奖励和消息使用。本阶段不写报单，也不发奖励。
+
+### 发货
+
+需要管理员令牌：
+
+- `GET /api/v1/admin/orders?zone=&status=&userId=&page=&pageSize=`
+- `GET /api/v1/admin/orders/:id`
+- `POST /api/v1/admin/orders/:id/ship`，body：`{ "courierName": "顺丰", "trackingNumber": "SF100" }`
+
+只有 `paid` 可以发货。成功后 `status` 为 `shipped`，并写上快递公司和运单号。重复发货返回 409「订单已发货」。未支付返回 409「只有已支付的订单可以发货」。快递公司或运单号为空返回 400「快递公司不正确」或「运单号不正确」。
+
+## 入座
+
+会员是已经有市场席位的用户。注册只写邀请树，不写席位。根账户启动时已经在两棵树的根上，不必购买。
+
+创业专区订单支付成功，并且至少有一件商品时，如果该用户还没有席位，就从邀请人的席位往下找一个空位，写入席位，同时把用户行的 `member` 和 `seated` 改成 true。这两次更新在支付成功的同一个事务里。一个订单无论买几件，都只占一个席位。已经有席位的用户再买创业专区商品，不会新增席位，也不会改上级。
+
+每个席位最多 3 个直接下级。下级谁在左边，只看入座时间，早的在左；时间相同则 id 小的在左。不另存左、中、右字段。
+
+找空位时：
+
+1. 用邀请关系找到邀请人的席位。邀请人还没有席位时，支付返回 400「缺少邀请关系」。
+2. 邀请人自己还有空位时，按从左到右的第一个空位入座。
+3. 这一层满了，就看下一层。每一组最多 3 个位子。优先坐空位更多的那一组；空位数一样时取最左边的一组；组内仍取最左边的空位。
+4. 再满就用同样的规则继续往下，不设层数上限。新席位沿上级走，一定能走回这位邀请人。
+
+接口文案不使用「市场树」或「节点」。
+
 ## 微信支付
 
 商户号、API 证书和 APIv3 密钥存在 `admin_settings`，由管理员接口写入，不写进代码或仓库。证书字段要同时贴上 `apiclient_cert.pem` 和 `apiclient_key.pem`。读取接口会打码 APIv3 密钥，并且不返回证书正文。三项都合法之后视为已配置。
@@ -294,13 +396,15 @@ T **不是**锁定项。环境变量 `MARKETING_MANAGER_MARKET_THRESHOLD_DEFAULT
 - `PUT /api/v1/admin/settings/wechat-pay`，body 可只带要改的字段：`merchantId`、`apiCertificate`、`apiV3Key`
 - `DELETE /api/v1/admin/settings/wechat-pay` 清空这三项，之后重新允许模拟成功
 
-支付单挂在已有订单上。订单需要是 `pending_payment`，金额是订单的 `pay_amount_fen`（分）。本接口不创建商城订单，也不做消费账户、提现账户或积分账户的冻结和划扣，也不处理分账或二清。
+正常结账走 `POST /api/v1/orders/:id/pay`。它在需要微信时才调用预下单。预下单金额是订单上的 `wechatFen`，不是整个应付。还没算过支付拆分时，直接预下单返回 400「订单尚未确定支付拆分」。
 
 - `POST /api/v1/payments/wechat/prepay`，body：`{ "orderId": "1", "appId": "wx...", "openid": "..." }`
-- 未配齐商户资料时返回 `mode: "sandbox"`，不调用微信。再用 `POST /api/v1/payments/wechat/sandbox/succeed`，body：`{ "payNo": "..." }`，把该支付单标为成功，并把仍处于待支付的订单标为 `paid`。
+- 未配齐商户资料时返回 `mode: "sandbox"`，不调用微信。`POST /api/v1/payments/wechat/sandbox/succeed`，body：`{ "payNo": "..." }`，把该支付单标为成功。订单若仍待支付，就扣掉已冻结的账户份额、扣库存并完成订单。`POST /api/v1/payments/wechat/sandbox/fail` 用同样的 body 模拟失败，释放冻结，不完成订单。
 - 已配齐时必须带 `appId`、`openid`，以及环境变量 `WECHAT_PAY_NOTIFY_URL`。接口向微信 JSAPI 下单，返回 `mode: "live"` 和小程序 `requestPayment` 需要的签名字段。
-- 回调是 `POST /api/v1/payments/wechat/notify`。验签和解密使用已保存的商户资料和微信支付平台证书。成功且金额、商户号一致时，支付单变为 `success`，订单从 `pending_payment` 变为 `paid`。`PAYERROR` / `CLOSED` / `REVOKED` 把仍在待支付的支付单标为 `failed`。`success` 之后不再改回失败；若之前已是 `failed` 又收到 `SUCCESS`，改为成功。重复通知不会重复写支付时间。
-- 商户资料已配齐时，模拟成功接口返回 403。
+- 回调是 `POST /api/v1/payments/wechat/notify`。验签和解密使用已保存的商户资料和微信支付平台证书。成功且金额、商户号一致时，支付单变为 `success`，并完成仍待支付的订单。`PAYERROR` / `CLOSED` / `REVOKED` 把仍在待支付的支付单标为 `failed`，并释放冻结。`success` 之后不再改回失败；若之前已是 `failed` 又收到 `SUCCESS`，改为成功。订单已经关闭时，这笔成功不会把订单改成已支付。重复通知不会重复扣款或重复入座。
+- 商户资料已配齐时，模拟成功和模拟失败都返回 403。
+
+密钥和证书只来自管理员已保存的商户资料，不写进代码。
 
 回调响应是微信要求的 `{ "code": "SUCCESS" | "FAIL", "message": "..." }`，不套本系统的 `{ code, message, data }`。
 
@@ -310,4 +414,4 @@ Schema 在 `prisma/schema/`，初始迁移在 `prisma/schema/migrations/`。没�
 
 表按域拆开：用户与身份、地址、管理员、商品与库存、订单与支付、钱包流水、Banner / 文章 / 滚动条、邀请树、市场树、报单、奖励流水、职位、红包、管理员配置。
 
-状态字段是字符串，由应用写入，数据库不设业务默认值。用户状态是 `active` / `disabled`，商品状态是 `draft` / `on` / `off`，实名状态是 `verified`。管理员状态是 `active`，订单状态使用 `pending_payment` / `paid` / `closed`，微信支付状态使用 `pending` / `success` / `failed`。其余注释里的状态仍是预留。
+状态字段是字符串，由应用写入，数据库不设业务默认值。用户状态是 `active` / `disabled`，商品状态是 `draft` / `on` / `off`，实名状态是 `verified`。管理员状态是 `active`，订单状态使用 `pending_payment` / `paid` / `shipped` / `closed`，微信支付状态使用 `pending` / `success` / `failed`，钱包冻结状态使用 `held` / `captured` / `released`。账户类型是 `points` / `withdrawable` / `consumption`。其余注释里的状态仍是预留。
