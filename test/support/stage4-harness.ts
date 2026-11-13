@@ -9,6 +9,9 @@ import { CofounderPayService } from '../../src/modules/cofounder/cofounder-pay.s
 import { CofounderPoolService } from '../../src/modules/cofounder/cofounder-pool.service';
 import { CofounderReviewService } from '../../src/modules/cofounder/cofounder-review.service';
 import { CofounderSettingsService } from '../../src/modules/cofounder/cofounder-settings.service';
+import { StudioEnrollmentService } from '../../src/modules/studio/studio-enrollment.service';
+import { StudioSettingsService } from '../../src/modules/studio/studio-settings.service';
+import { StudioSubsidyService } from '../../src/modules/studio/studio-subsidy.service';
 import { OrderPaymentSettler } from '../../src/modules/orders/order-payment.settler';
 import { OrdersService } from '../../src/modules/orders/orders.service';
 import { PaymentSettlementHook } from '../../src/modules/orders/payment-settlement.hook';
@@ -73,7 +76,8 @@ export function buildStage4(locked: LockedRuntimeConfig = stage4Locked(), thresh
     cofounderPool,
     cofounderSettings,
   );
-  const paid = new PaymentSettlementService(filing, awards, cofounderDividend);
+  const studioSubsidy = new StudioSubsidyService(locked, credits);
+  const paid = new PaymentSettlementService(filing, awards, cofounderDividend, studioSubsidy);
   const hook = new PaymentSettlementHook(paid);
   const settlement = new OrderPaymentSettler(wallet, trees, hook);
   const paySettings: {
@@ -126,6 +130,8 @@ export function buildStage4(locked: LockedRuntimeConfig = stage4Locked(), thresh
     cofounderReview,
     locked,
   );
+  const studioSettings = new StudioSettingsService(prisma, clock);
+  const studioEnrollment = new StudioEnrollmentService(prisma, clock);
   const displayNames = new DisplayNameService(prisma, clock, wallet);
   const settings = new SettingsService(prisma, clock, env);
   const performance = new MarketPerformanceService(prisma);
@@ -169,6 +175,9 @@ export function buildStage4(locked: LockedRuntimeConfig = stage4Locked(), thresh
     cofounderPay,
     cofounderReview,
     cofounderAdmin,
+    studioSubsidy,
+    studioSettings,
+    studioEnrollment,
     displayNames,
     cash,
   };

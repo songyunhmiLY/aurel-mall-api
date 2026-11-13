@@ -40,6 +40,8 @@ describe('locked runtime config', () => {
     expect(env.locked.cofounderDividendRatioBps).toBe(200);
     expect(env.locked.cofounderStartupDividendRatioBps).toBe(200);
     expect(env.locked.cofounderMallDividendRatioBps).toBe(200);
+    expect(env.locked.studioStartupSubsidyRatioBps).toBe(200);
+    expect(env.locked.studioMallSubsidyRatioBps).toBe(200);
     expect(env.locked.positionDividendPools.map((tier) => tier.positionCode)).toEqual([
       'marketing_manager',
       'senior_manager',
@@ -128,6 +130,17 @@ describe('locked runtime config', () => {
     });
     expect(blank.locked.cofounderStartupDividendRatioBps).toBe(200);
     expect(blank.locked.cofounderMallDividendRatioBps).toBe(200);
+  });
+
+  it('keeps the two studio subsidy rates independent', () => {
+    const overridden = parseAppEnv({
+      ...example,
+      STUDIO_STARTUP_SUBSIDY_RATIO_BPS: '250',
+      STUDIO_MALL_SUBSIDY_RATIO_BPS: '150',
+    });
+    expect(overridden.locked.studioStartupSubsidyRatioBps).toBe(250);
+    expect(overridden.locked.studioMallSubsidyRatioBps).toBe(150);
+    expect(overridden.locked).not.toHaveProperty('studioDividendRatioBps');
   });
 
   it('rejects duplicate position codes', () => {

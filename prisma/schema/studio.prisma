@@ -1,0 +1,38 @@
+/// 工作室身份。同一用户同时最多一条 active。取消后可以再指定，另写一行。
+/// 只有管理员指定。没有支付开通，也没有名额上限。
+/// status: active / cancelled。取消不退款，也不动钱包。
+model StudioEnrollment {
+  id                 BigInt    @id @default(autoincrement())
+  userId             BigInt    @map("user_id")
+  status             String    @db.VarChar(32)
+  appointedByAdminId BigInt    @map("appointed_by_admin_id")
+  enrolledAt         DateTime  @map("enrolled_at") @db.DateTime(3)
+  cancelledAt        DateTime? @map("cancelled_at") @db.DateTime(3)
+  cancelledByAdminId BigInt?   @map("cancelled_by_admin_id")
+  createdAt          DateTime  @map("created_at") @db.DateTime(3)
+  updatedAt          DateTime  @map("updated_at") @db.DateTime(3)
+
+  @@index([userId, status], map: "studio_enrollments_user_status_idx")
+  @@index([status, enrolledAt], map: "studio_enrollments_status_enrolled_idx")
+  @@map("studio_enrollments")
+}
+
+/// 一笔已支付订单对一名当时在籍的工作室计提一次。金额为 0 的不写。
+/// 同一订单可以有多行：每个包含该订单的工作室各一行，互不拆分。
+/// baseField: goods_total_fen 创业专区应付（市场树）/ pv_fen 商城 PV（邀请树）。
+model StudioAccrual {
+  id         BigInt   @id @default(autoincrement())
+  orderId    BigInt   @map("order_id")
+  userId     BigInt   @map("user_id")
+  zone       String   @db.VarChar(32)
+  baseField  String   @map("base_field") @db.VarChar(32)
+  baseFen    BigInt   @map("base_fen")
+  ratioBps   Int      @map("ratio_bps")
+  amountFen  BigInt   @map("amount_fen")
+  occurredAt DateTime @map("occurred_at") @db.DateTime(3)
+  createdAt  DateTime @map("created_at") @db.DateTime(3)
+
+  @@unique([orderId, userId], map: "studio_accruals_order_user_uq")
+  @@index([userId, occurredAt], map: "studio_accruals_user_occurred_idx")
+  @@map("studio_accruals")
+}

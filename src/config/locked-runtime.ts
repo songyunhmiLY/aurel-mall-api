@@ -47,7 +47,16 @@ export interface LockedRuntimeConfig {
   cofounderStartupDividendRatioBps: number;
   /** 会员商城订单 PV 计提万分比。 */
   cofounderMallDividendRatioBps: number;
-  studioDividendRatioBps: number;
+  /**
+   * 工作室市场树创业专区补贴。基数是 goods_total_fen。
+   * 官方示例 200 = 2%。与商城那条分开配置，都不是管理端可改项。
+   */
+  studioStartupSubsidyRatioBps: number;
+  /**
+   * 工作室邀请树商城补贴。基数是 pv_fen。
+   * 官方示例 200 = 2%。与创业专区那条分开配置，都不是管理端可改项。
+   */
+  studioMallSubsidyRatioBps: number;
   operationsTeamDividendRatioBps: number;
   /**
    * 提现手续费，单位分。打款时从申请金额里减去当时的这个值。
@@ -76,7 +85,8 @@ export const LOCKED_RUNTIME_ENV_KEYS = [
   'RED_PACKET_ROUND_PAY_THRESHOLD_FEN',
   'RED_PACKET_ROUND_CLAIM_CAP_FEN',
   'COFOUNDER_DIVIDEND_RATIO_BPS',
-  'STUDIO_DIVIDEND_RATIO_BPS',
+  'STUDIO_STARTUP_SUBSIDY_RATIO_BPS',
+  'STUDIO_MALL_SUBSIDY_RATIO_BPS',
   'OPERATIONS_TEAM_DIVIDEND_RATIO_BPS',
   'WITHDRAWAL_FEE_FEN',
 ] as const;
@@ -119,7 +129,14 @@ export function parseLockedRuntimeConfig(source: NodeJS.ProcessEnv): LockedRunti
     }),
     redPacketRoundClaimCapFen: readInt(source, 'RED_PACKET_ROUND_CLAIM_CAP_FEN', { min: 0 }),
     ...readCofounderRatios(source),
-    studioDividendRatioBps: readInt(source, 'STUDIO_DIVIDEND_RATIO_BPS', { min: 0, max: BPS_MAX }),
+    studioStartupSubsidyRatioBps: readInt(source, 'STUDIO_STARTUP_SUBSIDY_RATIO_BPS', {
+      min: 0,
+      max: BPS_MAX,
+    }),
+    studioMallSubsidyRatioBps: readInt(source, 'STUDIO_MALL_SUBSIDY_RATIO_BPS', {
+      min: 0,
+      max: BPS_MAX,
+    }),
     operationsTeamDividendRatioBps: readInt(source, 'OPERATIONS_TEAM_DIVIDEND_RATIO_BPS', {
       min: 0,
       max: BPS_MAX,
