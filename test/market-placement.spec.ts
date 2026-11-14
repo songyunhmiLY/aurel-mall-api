@@ -143,6 +143,7 @@ describe('market seating', () => {
     const first = marketNode(stage.db, buyer);
     expect(first?.parentUserId).toBe(rootId);
     expect(first?.slot).toBe(1);
+    const stamped = stage.db.user.rows.find((row) => row.id === buyer)!.updatedAt;
 
     // 把上级剩下两个位置占满，再让同一个人支付一次创业专区。
     graftMarket(stage.db, 8801n, rootId, at(10));
@@ -156,6 +157,8 @@ describe('market seating', () => {
     expect(after?.slot).toBe(1);
     expect(after?.depth).toBe(first?.depth);
     expect(stage.db.marketTreeNode.rows.filter((row) => row.userId === buyer)).toHaveLength(1);
+    // 标记已经对齐，复购不再写用户行。
+    expect(stage.db.user.rows.find((row) => row.id === buyer)!.updatedAt).toEqual(stamped);
   });
 });
 

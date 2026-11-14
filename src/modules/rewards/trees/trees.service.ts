@@ -32,12 +32,12 @@ export class TreesService {
 
   /**
    * 已有席位则原样返回，不新增也不搬家。
-   * 新席位和用户上的会员标记在同一事务里写入。
+   * 席位是权威，用户上的 member / seated 只是它的影子标记，这里只做补齐。
    */
   async seat(tx: Tx, userId: bigint, now: Date): Promise<void> {
     const existing = await tx.marketTreeNode.findUnique({ where: { userId } });
     if (existing) {
-      await this.markSeated(tx, userId, now);
+      await this.ensureSeated(tx, userId, now);
       return;
     }
     const inviter = await this.requireInviterSeat(tx, userId);
@@ -93,7 +93,7 @@ export class TreesService {
           if (isUserSeatConflict(error)) {
             // 同一用户两笔并发支付：另一笔已经把他放进树里了。
             // 这里收敛成「已入座」，不能当成槽位被抢去换下一个槽位。
-            await this.markSeated(tx, userId, now);
+            await this.ensureSeated(tx, userId, now);
             return;
           }
           // 槽位被别人抢了，换下一个。
@@ -120,7 +120,7 @@ export class TreesService {
         where: { userId: parent.userId },
         data: { childCount: { increment: 1 } },
       });
-      await this.markSeated(tx, userId, now);
+      await this.ensureSeated(tx, userId, now);
       return;
     }
     throw new InternalServerErrorException('入座失败');
@@ -175,10 +175,20 @@ export class TreesService {
     });
   }
 
-  private async markSeated(tx: Tx, userId: bigint, now: Date): Promise<void> {
+  /**
+   * 把用户上的会员标记对齐到「树里有席位」这个事实。
+   *
+   * 正常入座时节点和标记在同一事务里写，不会分叉；这里兜的是分叉过的数据：
+   * 手工改库、早期版本、迁移中断，以及并发下被另一笔支付抢先建好节点的情况。
+   * 已经对齐就一行都不写，避免每次复购都去更新一次用户行。
+   */
+  private async ensureSeated(tx: Tx, userId: bigint, now: Date): Promise<void> {
     const user = await tx.user.findUnique({ where: { id: userId } });
     if (!user) {
       throw new InternalServerErrorException('入座失败');
+    }
+    if (user.member && user.seated && user.inviteCode) {
+      return;
     }
     const inviteCode = user.inviteCode ?? (await allocateInviteCode(tx));
     await tx.user.update({
