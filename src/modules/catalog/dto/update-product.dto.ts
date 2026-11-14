@@ -65,6 +65,13 @@ export class UpdateProductDto {
 
   @IsOptional()
   @ValidateIf((_, value) => value !== null)
+  @IsInt()
+  @Min(0)
+  @Max(MAX_INT)
+  costFen?: number | null;
+
+  @IsOptional()
+  @ValidateIf((_, value) => value !== null)
   @Matches(/^\d+$/, { message: '分类编号不正确' })
   categoryId?: string | null;
 

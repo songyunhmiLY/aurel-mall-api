@@ -48,6 +48,8 @@ model OrderItem {
   pvFen        Int      @map("pv_fen")
   /// 商品运费单价。行运费 = freight_fen × quantity。
   freightFen   Int      @map("freight_fen")
+  /// 下单时的含运费成本单价快照。旧订单与未录成本的商品为空，利润口径按 0 计。
+  unitCostFen  Int?     @map("unit_cost_fen")
   quantity     Int
   lineTotalFen Int      @map("line_total_fen")
   createdAt    DateTime @map("created_at") @db.DateTime(3)

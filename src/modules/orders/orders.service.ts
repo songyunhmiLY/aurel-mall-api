@@ -128,6 +128,7 @@ interface QuotedLine {
   unitPriceFen: number;
   unitPvFen: number;
   unitFreightFen: number;
+  unitCostFen: number | null;
   quantity: number;
   lineTotalFen: number;
   linePvFen: number;
@@ -217,6 +218,7 @@ export class OrdersService {
           unitPriceFen: line.unitPriceFen,
           pvFen: line.unitPvFen,
           freightFen: line.unitFreightFen,
+          unitCostFen: line.unitCostFen,
           quantity: line.quantity,
           lineTotalFen: line.lineTotalFen,
           createdAt: now,
@@ -561,6 +563,9 @@ function quoteLine(
   if (!Number.isInteger(product.freightFen) || product.freightFen < 0) {
     throw new BadRequestException('运费不正确');
   }
+  if (sku.costFen !== null && (!Number.isInteger(sku.costFen) || sku.costFen < 0)) {
+    throw new BadRequestException('成本价不正确');
+  }
   const pv = unitPvFen ?? 0;
   return {
     skuId: sku.id,
@@ -569,6 +574,7 @@ function quoteLine(
     unitPriceFen: priceFen,
     unitPvFen: pv,
     unitFreightFen: product.freightFen,
+    unitCostFen: sku.costFen,
     quantity,
     lineTotalFen: checkedMul(priceFen, quantity),
     linePvFen: checkedMul(pv, quantity),

@@ -46,6 +46,7 @@ model ProductImage {
 }
 
 /// priceFen 单位为分。pvFen 只用于商城：100 = 1 PV = 1 元，不是售价。创业专区保持 null。
+/// costFen 是含运费的进货成本，可空；未设置时利润口径按 0 计，不禁止上架。
 model ProductSku {
   id        BigInt   @id @default(autoincrement())
   productId BigInt   @map("product_id")
@@ -53,6 +54,7 @@ model ProductSku {
   name      String   @db.VarChar(128)
   priceFen  Int      @map("price_fen")
   pvFen     Int?     @map("pv_fen")
+  costFen   Int?     @map("cost_fen")
   status    String   @db.VarChar(32)
   createdAt DateTime @map("created_at") @db.DateTime(3)
   updatedAt DateTime @map("updated_at") @db.DateTime(3)

@@ -38,6 +38,23 @@ export class FinanceController {
   reconciliation(@Query('from') from?: string, @Query('to') to?: string) {
     return this.finance.reconciliation(from, to);
   }
+
+  @Get('sku-sales')
+  skuSales(
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('zone') zone?: string,
+    @Query('page') page?: string,
+    @Query('pageSize') pageSize?: string,
+  ) {
+    return this.finance.skuSales({
+      from,
+      to,
+      zone,
+      page: parsePage(page),
+      pageSize: parsePageSize(pageSize),
+    });
+  }
 }
 
 function normalizeDirection(value: string | undefined): string | undefined {

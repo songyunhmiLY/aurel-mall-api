@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { ClockService } from '../../common/clock/clock.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { PRODUCT_ZONES } from '../catalog/catalog.constants';
 import { ORDER_PAID, ORDER_SHIPPED } from '../orders/order.constants';
 import {
   CASH_INFLOW,
@@ -62,6 +63,33 @@ export interface ReconciliationView {
   matched: boolean;
   /** 差多少笔、差在哪几单。最多列 20 单。 */
   missingOrderIds: string[];
+}
+
+export interface SkuSalesRow {
+  skuId: string;
+  productName: string;
+  skuName: string;
+  /** 区间内销量（件）。 */
+  quantity: number;
+  /** 销售金额（行商品金额合计，分）。 */
+  salesAmountFen: string;
+  pendingQuantity: number;
+  pendingAmountFen: string;
+  shippedQuantity: number;
+  shippedAmountFen: string;
+  /** 含运费的成本合计（分）。订单行没有成本快照时按 0 计。 */
+  costAmountFen: string;
+  /** 毛利 = 销售金额 - 成本合计（分）。 */
+  profitFen: string;
+}
+
+export interface SkuSalesPage {
+  range: { from: string; to: string };
+  zone?: string;
+  rows: SkuSalesRow[];
+  total: number;
+  page: number;
+  pageSize: number;
 }
 
 /**
@@ -208,6 +236,104 @@ export class FinanceService {
     };
   }
 
+  /**
+   * 单品销售汇总。按 SKU 汇总区间内已支付/已发货订单的销量、金额，
+   * 并按订单状态拆出待发货（paid）与已发货（shipped）。按 paidAt 落区间。
+   */
+  async skuSales(input: {
+    from?: string;
+    to?: string;
+    zone?: string;
+    page: number;
+    pageSize: number;
+  }): Promise<SkuSalesPage> {
+    const range = await this.parseRange(input.from, input.to);
+    const zone =
+      input.zone === undefined || input.zone.trim() === ''
+        ? undefined
+        : assertZone(input.zone);
+    const orders = await this.prisma.order.findMany({
+      where: {
+        status: { in: PAID_STATUSES },
+        paidAt: { gte: range.from, lt: range.to },
+        ...(zone === undefined ? {} : { zone }),
+      },
+      select: { id: true, status: true },
+    });
+    const orderStatusById = new Map(orders.map((order) => [order.id, order.status]));
+    const items = orders.length
+      ? await this.prisma.orderItem.findMany({
+          where: { orderId: { in: orders.map((order) => order.id) } },
+        })
+      : [];
+    const bySku = new Map<
+      string,
+      {
+        skuId: string;
+        productName: string;
+        skuName: string;
+        quantity: number;
+        salesAmountFen: number;
+        pendingQuantity: number;
+        pendingAmountFen: number;
+        shippedQuantity: number;
+        shippedAmountFen: number;
+        costAmountFen: number;
+      }
+    >();
+    for (const item of items) {
+      const status = orderStatusById.get(item.orderId);
+      if (status === undefined) {
+        continue;
+      }
+      const key = item.skuId.toString();
+      const row =
+        bySku.get(key) ??
+        {
+          skuId: key,
+          productName: item.productName,
+          skuName: item.skuName,
+          quantity: 0,
+          salesAmountFen: 0,
+          pendingQuantity: 0,
+          pendingAmountFen: 0,
+          shippedQuantity: 0,
+          shippedAmountFen: 0,
+          costAmountFen: 0,
+        };
+      row.quantity += item.quantity;
+      row.salesAmountFen += item.lineTotalFen;
+      if (status === ORDER_PAID) {
+        row.pendingQuantity += item.quantity;
+        row.pendingAmountFen += item.lineTotalFen;
+      } else {
+        row.shippedQuantity += item.quantity;
+        row.shippedAmountFen += item.lineTotalFen;
+      }
+      row.costAmountFen += (item.unitCostFen ?? 0) * item.quantity;
+      bySku.set(key, row);
+    }
+    const all = [...bySku.values()]
+      .sort((left, right) => right.salesAmountFen - left.salesAmountFen)
+      .map((row) => ({
+        ...row,
+        salesAmountFen: row.salesAmountFen.toString(),
+        pendingAmountFen: row.pendingAmountFen.toString(),
+        shippedAmountFen: row.shippedAmountFen.toString(),
+        costAmountFen: row.costAmountFen.toString(),
+        profitFen: (row.salesAmountFen - row.costAmountFen).toString(),
+      }));
+    const start = (input.page - 1) * input.pageSize;
+    return {
+      range: { from: range.from.toISOString(), to: range.to.toISOString() },
+      ...(zone === undefined ? {} : { zone }),
+      rows: all.slice(start, start + input.pageSize),
+      total: all.length,
+      page: input.page,
+      pageSize: input.pageSize,
+    };
+  }
+
   /** 抽样找漏记的订单。只取最近 200 单，避免全表扫。 */
   private async findMissingOrders(range: FinanceRange): Promise<string[]> {
     const orders = await this.prisma.order.findMany({
@@ -272,4 +398,12 @@ export class FinanceService {
     }
     return parsed;
   }
+}
+
+function assertZone(value: string): string {
+  const trimmed = value.trim();
+  if (!(PRODUCT_ZONES as readonly string[]).includes(trimmed)) {
+    throw new BadRequestException('专区不正确');
+  }
+  return trimmed;
 }

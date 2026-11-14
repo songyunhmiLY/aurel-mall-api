@@ -61,6 +61,8 @@ export interface AdminProductView {
   freightFen: number;
   priceFen: number;
   pvFen: number | null;
+  /** 含运费的进货成本，可空。未设置时利润口径按 0 计。 */
+  costFen: number | null;
   stockQuantity: number;
   status: string;
   skuId: bigint;
@@ -92,6 +94,7 @@ export interface CreateProductInput {
   freightFen: number;
   priceFen?: number;
   pvFen?: number | null;
+  costFen?: number | null;
   categoryId?: bigint | null;
   stockQuantity: number;
   status?: string;
@@ -106,6 +109,7 @@ export interface UpdateProductInput {
   freightFen?: number;
   priceFen?: number;
   pvFen?: number | null;
+  costFen?: number | null;
   categoryId?: bigint | null;
   status?: string;
 }
@@ -235,6 +239,7 @@ export class CatalogService {
           name: fields.name,
           priceFen: commerce.priceFen,
           pvFen: commerce.pvFen,
+          costFen: readCostFen(input.costFen),
           status,
           createdAt: now,
           updatedAt: now,
@@ -298,6 +303,7 @@ export class CatalogService {
           name,
           priceFen: commerce.priceFen,
           pvFen: commerce.pvFen,
+          ...(input.costFen === undefined ? {} : { costFen: readCostFen(input.costFen) }),
           status,
           updatedAt: now,
         },
@@ -570,6 +576,14 @@ function parseZone(zone: string): string {
   return zone;
 }
 
+/** 成本价可空；给值时必须是不小于 0 的整数（分）。 */
+function readCostFen(value: number | null | undefined): number | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  return assertNonNegativeInt(value, '成本价');
+}
+
 function parseStatus(status: string): string {
   if (!(PRODUCT_STATUSES as readonly string[]).includes(status)) {
     throw new BadRequestException('商品状态不正确');
@@ -668,6 +682,7 @@ function toAdmin(
     freightFen: product.freightFen,
     priceFen: sku.priceFen,
     pvFen: sku.pvFen,
+    costFen: sku.costFen,
     stockQuantity: stock.quantity,
     status: product.status,
     skuId: sku.id,
