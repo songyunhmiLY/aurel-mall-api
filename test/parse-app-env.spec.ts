@@ -78,6 +78,17 @@ describe('locked runtime config', () => {
     expect(parseAppEnv({ ...example, ALLOW_PREVIEW_AUTH: 'true' }).allowPreviewAuth).toBe(true);
   });
 
+  it('defaults the simulation switch to off and forbids it in production', () => {
+    expect(parseAppEnv(example).simulationEnabled).toBe(false);
+    expect(
+      parseAppEnv({ ...example, SIMULATION_ENABLED: 'true', NODE_ENV: 'development' })
+        .simulationEnabled,
+    ).toBe(true);
+    expect(() =>
+      parseAppEnv({ ...example, SIMULATION_ENABLED: 'true', NODE_ENV: 'production' }),
+    ).toThrow(/SIMULATION_ENABLED/);
+  });
+
   it('rejects a wallet split that does not add up to 10000', () => {
     expect(() => parseAppEnv({ ...example, STARTUP_AWARD_WITHDRAWABLE_BPS: '2000' })).toThrow(
       /STARTUP_AWARD/,

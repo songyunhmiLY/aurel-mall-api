@@ -58,6 +58,7 @@ export function stage1Env(overrides: Partial<AppEnv> = {}): AppEnv {
     redisUrl: 'redis://127.0.0.1:6379',
     allowClockOverride: false,
     allowPreviewAuth: false,
+    simulationEnabled: false,
     adminJwtSecret: 'test-secret-admin',
     miniProgramTokenSecret: 'test-secret-mini',
     corsOrigins: [],

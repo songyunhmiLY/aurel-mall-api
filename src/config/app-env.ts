@@ -8,6 +8,8 @@ export interface AppEnv {
   redisUrl: string;
   allowClockOverride: boolean;
   allowPreviewAuth: boolean;
+  /** 时间仿真台开关。默认关闭；生产环境显式为 true 会被拒绝启动。 */
+  simulationEnabled: boolean;
   adminJwtSecret: string;
   miniProgramTokenSecret: string;
   /** 允许跨域访问的前端源。为空表示只接受同源请求（生产建议用 nginx 反代）。 */
@@ -36,6 +38,7 @@ export function parseAppEnv(source: NodeJS.ProcessEnv): AppEnv {
     redisUrl,
     allowClockOverride: readFlag(source, 'ALLOW_CLOCK_OVERRIDE'),
     allowPreviewAuth: readFlag(source, 'ALLOW_PREVIEW_AUTH'),
+    simulationEnabled: readSimulationEnabled(source, nodeEnv),
     adminJwtSecret: readSecret(source, 'JWT_ADMIN_SECRET', nodeEnv),
     miniProgramTokenSecret: readSecret(source, 'MINI_PROGRAM_TOKEN_SECRET', nodeEnv),
     corsOrigins: readCorsOrigins(source),
@@ -89,6 +92,19 @@ function readFlag(source: NodeJS.ProcessEnv, key: string): boolean {
     return false;
   }
   throw new Error(`环境变量 ${key} 只能是 true 或 false`);
+}
+
+/**
+ * 时间仿真台只在测试/开发环境可用。
+ * 默认关闭；显式为 true 时允许，但生产环境（NODE_ENV=production）一律拒绝启动，
+ * 避免任何正式部署误开仿真。
+ */
+function readSimulationEnabled(source: NodeJS.ProcessEnv, nodeEnv: string): boolean {
+  const enabled = readFlag(source, 'SIMULATION_ENABLED');
+  if (enabled && nodeEnv === 'production') {
+    throw new Error('生产环境不允许开启 SIMULATION_ENABLED（时间仿真台只在测试环境使用）');
+  }
+  return enabled;
 }
 
 /** 仓库里出现过的示例密钥。生产环境出现这些值等同于没有设密码。 */

@@ -13,6 +13,7 @@ function env(allowClockOverride: boolean): AppEnv {
     redisUrl: 'redis://127.0.0.1:6379',
     allowClockOverride,
     allowPreviewAuth: false,
+    simulationEnabled: false,
     adminJwtSecret: 'test-secret-admin',
     wechatMiniAppId: null,
     wechatMiniAppSecret: null,

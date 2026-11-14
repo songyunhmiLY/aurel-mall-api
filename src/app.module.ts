@@ -21,6 +21,7 @@ import { OrdersModule } from './modules/orders/orders.module';
 import { PaymentsModule } from './modules/payments/payments.module';
 import { RewardsModule } from './modules/rewards/rewards.module';
 import { SettingsModule } from './modules/settings/settings.module';
+import { SimulationModule } from './modules/simulation/simulation.module';
 import { UsersModule } from './modules/users/users.module';
 import { WalletModule } from './modules/wallet/wallet.module';
 
@@ -46,6 +47,7 @@ import { WalletModule } from './modules/wallet/wallet.module';
     FinanceModule,
     RewardsModule,
     SettingsModule,
+    SimulationModule,
     CofounderModule,
     CofounderPayModule,
     StudioModule,

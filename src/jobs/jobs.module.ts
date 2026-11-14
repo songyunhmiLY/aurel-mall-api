@@ -29,5 +29,6 @@ import { DUE_QUEUE } from './jobs.constants';
     OrdersModule,
   ],
   providers: [DueJobRunner, DueJobProcessor, DueJobScheduler],
+  exports: [DueJobRunner],
 })
 export class JobsModule {}
