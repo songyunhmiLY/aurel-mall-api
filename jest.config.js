@@ -8,4 +8,6 @@ module.exports = {
   },
   testEnvironment: 'node',
   clearMocks: true,
+  // 集成测试需要真实 MySQL，只通过 npm run test:integration 单独运行。
+  testPathIgnorePatterns: ['/node_modules/', 'test/integration/'],
 };
