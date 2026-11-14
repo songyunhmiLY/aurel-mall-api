@@ -17,6 +17,7 @@ import { StudioSubsidyService } from '../../src/modules/studio/studio-subsidy.se
 import { OrderPaymentSettler } from '../../src/modules/orders/order-payment.settler';
 import { OrdersService } from '../../src/modules/orders/orders.service';
 import { PaymentSettlementHook } from '../../src/modules/orders/payment-settlement.hook';
+import { SettlementCompensationService } from '../../src/modules/orders/settlement-compensation.service';
 import type { WechatPayGateway } from '../../src/modules/payments/wechat-pay.gateway';
 import type {
   WechatPayCredentials,
@@ -112,6 +113,8 @@ export function buildStage4(locked: LockedRuntimeConfig = stage4Locked(), thresh
     gateway as unknown as WechatPayGateway,
     env,
     settlement,
+    undefined,
+    cash,
   );
   const orders = new OrdersService(prisma, clock, wallet, trees, settlement, wechatPay, locked);
   const cofounderEnrollment = new CofounderEnrollmentService(
@@ -149,7 +152,16 @@ export function buildStage4(locked: LockedRuntimeConfig = stage4Locked(), thresh
   const team = new TeamService(prisma, clock, performance);
   const redPackets = new RedPacketService(prisma, clock, locked, credits);
   const welfareAdmin = new RedPacketAdminService(prisma, clock, redPackets);
-  const jobs = new DueJobRunner(filing, positions, redPackets, cofounderDividend);
+  const compensations = new SettlementCompensationService(
+    prisma,
+    clock,
+    wallet,
+    settlement,
+    cash,
+    paySettings as unknown as WechatPaySettingsService,
+    gateway as unknown as WechatPayGateway,
+  );
+  const jobs = new DueJobRunner(filing, positions, redPackets, cofounderDividend, compensations);
   const network = new NetworkAdminService(prisma, performance);
   const filingQuery = new FilingQueryService(prisma);
   const awardAdmin = new AwardAdminService(prisma);
@@ -174,6 +186,7 @@ export function buildStage4(locked: LockedRuntimeConfig = stage4Locked(), thresh
     filingQuery,
     awardAdmin,
     walletAdmin,
+    compensations,
     performance,
     wechatPay,
     paySettings,

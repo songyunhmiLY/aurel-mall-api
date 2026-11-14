@@ -84,6 +84,35 @@ model Payment {
   @@map("payments")
 }
 
+/// 结算补偿。微信已扣款、本地结算事务失败时登记。
+/// failReason: stock_insufficient / order_cancelled / seat_failure / wallet_shortfall / transient
+/// status: auto_retry（定时重试）/ awaiting_operation（人工处理）/ completed / refunded
+/// 每个订单最多一条记录。补货与补偿解耦：库存调整不触发本表，人工点「继续结算」才重试。
+model SettlementCompensation {
+  id              BigInt    @id @default(autoincrement())
+  orderId         BigInt    @unique(map: "settlement_compensations_order_id_uq") @map("order_id")
+  payNo           String    @map("pay_no") @db.VarChar(64)
+  userId          BigInt    @map("user_id")
+  zone            String    @db.VarChar(32)
+  /// 微信交易号，回调里带的 transaction_id。
+  wechatTradeNo   String?   @map("wechat_trade_no") @db.VarChar(64)
+  /// 微信实收金额（payments.amount_fen）。
+  amountFen       Int       @map("amount_fen")
+  failReason      String    @map("fail_reason") @db.VarChar(32)
+  status          String    @db.VarChar(32)
+  retryCount      Int       @default(0) @map("retry_count")
+  lastError       String?   @map("last_error") @db.VarChar(255)
+  lastTriedAt     DateTime? @map("last_tried_at") @db.DateTime(3)
+  completedAt     DateTime? @map("completed_at") @db.DateTime(3)
+  refundedAt      DateTime? @map("refunded_at") @db.DateTime(3)
+  operatorAdminId BigInt?   @map("operator_admin_id")
+  createdAt       DateTime  @map("created_at") @db.DateTime(3)
+  updatedAt       DateTime  @map("updated_at") @db.DateTime(3)
+
+  @@index([status, lastTriedAt], map: "settlement_compensations_status_tried_idx")
+  @@map("settlement_compensations")
+}
+
 /// status: pending / approved / rejected。
 /// 申请时不写退款金额和减扣金额。审核通过时两者补齐，且之和等于订单应付。
 /// 创业专区订单不能写入通过状态。已发奖励不在这张表回滚。

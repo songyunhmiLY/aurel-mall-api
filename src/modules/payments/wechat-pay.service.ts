@@ -16,6 +16,7 @@ import { PrismaService } from '../../common/prisma/prisma.service';
 import type { AppEnv } from '../../config/app-env';
 import { APP_ENV } from '../../config/tokens';
 import { signJsapiPay } from './wechat-pay-crypto';
+import { SettlementFailedNeedsCompensation } from './settlement-compensation.signal';
 import {
   WechatPayGateway,
   type VerifiedWechatTrade,
@@ -30,7 +31,16 @@ import {
   activeCofounderSlot,
   activePaymentSlot,
 } from './wechat-pay.constants';
-import { OrderPaymentSettler } from '../orders/order-payment.settler';
+import { OrderPaymentSettler, classifySettlementError } from '../orders/order-payment.settler';
+import {
+  COMPENSATION_REASON_CANCELLED,
+  COMPENSATION_AUTO_RETRY,
+  COMPENSATION_AWAITING_OPERATION,
+  COMPENSATION_COMPLETED,
+  COMPENSATION_REFUNDED,
+} from '../orders/settlement-compensation.constants';
+import { CASH_ORDER_WECHAT } from '../wallet/wallet.constants';
+import { CashLedgerService } from '../wallet/cash-ledger.service';
 import { CofounderActivationSettler } from '../cofounder/cofounder-activation.settler';
 import { IDENTITY_PROVIDERS } from '../users/identity.constants';
 
@@ -105,6 +115,7 @@ export class WechatPayService {
     @Optional()
     @Inject(forwardRef(() => CofounderActivationSettler))
     activationSettler?: CofounderActivationSettler,
+    private readonly cash?: CashLedgerService,
   ) {
     this.activationSettler = activationSettler;
   }
@@ -132,6 +143,17 @@ export class WechatPayService {
     }
     if (order.status !== ORDER_PENDING_PAYMENT) {
       throw new ConflictException('订单不在待支付状态');
+    }
+    // 有活跃补偿单说明微信已扣过款、正在补结算。放行会造成二次扣款。
+    const activeCompensation = await this.prisma.settlementCompensation.findFirst({
+      where: {
+        orderId,
+        status: { in: [COMPENSATION_AUTO_RETRY, COMPENSATION_AWAITING_OPERATION] },
+      },
+      select: { id: true },
+    });
+    if (activeCompensation) {
+      throw new ConflictException('支付确认处理中，请稍候在订单页查看状态');
     }
     const chargeFen = resolveWechatChargeFen(order);
     if (!Number.isInteger(chargeFen) || chargeFen < 0) {
@@ -487,90 +509,211 @@ export class WechatPayService {
 
   private async applyTrade(input: ApplyTradeInput): Promise<WechatPaymentResult> {
     const now = await this.clock.now();
-    return this.prisma.$transaction(async (tx) => {
-      const payment = await lockPayment(tx, input.payNo);
-      if (!payment || payment.channel !== WECHAT_PAY_CHANNEL) {
-        throw new NotFoundException('支付单不存在');
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        return this.applyTradeInTx(tx, input, now);
+      });
+    } catch (error) {
+      if (error instanceof SettlementFailedNeedsCompensation) {
+        return this.recordSettlementCompensation(error);
       }
-      if (input.mchId && input.expectedMchId && input.mchId !== input.expectedMchId) {
-        throw new BadRequestException('微信支付商户号不一致');
-      }
-      const amountFen = normalizeAmountFen(payment.amountFen);
-      if (input.amountFen !== null && input.amountFen !== amountFen) {
-        throw new BadRequestException('支付金额不一致');
-      }
-      const succeededAt = normalizeInstant(this.clock, payment.succeededAt);
-      const current = assertPaymentStatus(payment.status);
-      const next = nextPaymentStatus(current, input.tradeState);
-      if (
-        next === 'success' &&
-        current !== 'success' &&
-        input.requireTransactionId &&
-        !input.transactionId
-      ) {
-        throw new BadRequestException('微信支付成功回调缺少 transaction_id');
-      }
-      if ((payment.purpose || PAYMENT_PURPOSE_ORDER) === PAYMENT_PURPOSE_COFOUNDER) {
-        return this.finishActivation(
-          tx,
-          payment,
-          input,
-          now,
+      throw error;
+    }
+  }
+
+  private async applyTradeInTx(
+    tx: Prisma.TransactionClient,
+    input: ApplyTradeInput,
+    now: Date,
+  ): Promise<WechatPaymentResult> {
+    const payment = await lockPayment(tx, input.payNo);
+    if (!payment || payment.channel !== WECHAT_PAY_CHANNEL) {
+      throw new NotFoundException('支付单不存在');
+    }
+    if (input.mchId && input.expectedMchId && input.mchId !== input.expectedMchId) {
+      throw new BadRequestException('微信支付商户号不一致');
+    }
+    const amountFen = normalizeAmountFen(payment.amountFen);
+    if (input.amountFen !== null && input.amountFen !== amountFen) {
+      throw new BadRequestException('支付金额不一致');
+    }
+    const succeededAt = normalizeInstant(this.clock, payment.succeededAt);
+    const current = assertPaymentStatus(payment.status);
+    const next = nextPaymentStatus(current, input.tradeState);
+    if (
+      next === 'success' &&
+      current !== 'success' &&
+      input.requireTransactionId &&
+      !input.transactionId
+    ) {
+      throw new BadRequestException('微信支付成功回调缺少 transaction_id');
+    }
+    if ((payment.purpose || PAYMENT_PURPOSE_ORDER) === PAYMENT_PURPOSE_COFOUNDER) {
+      return this.finishActivation(
+        tx,
+        payment,
+        input,
+        now,
+        amountFen,
+        succeededAt,
+        current,
+        next,
+      );
+    }
+    if (payment.orderId === null) {
+      throw new NotFoundException('订单不存在');
+    }
+    const order = await lockOrder(tx, payment.orderId);
+    if (!order) {
+      throw new NotFoundException('订单不存在');
+    }
+    if (next === current) {
+      return toPaymentResult({ ...payment, amountFen, succeededAt }, order.status);
+    }
+    const becameSuccess = next === 'success';
+    const becameFailed = next === 'failed' && current === 'pending';
+    if (
+      becameSuccess &&
+      order.status !== ORDER_PENDING_PAYMENT &&
+      order.status !== ORDER_PAID &&
+      order.status !== ORDER_SHIPPED
+    ) {
+      // 订单已被超时取消等场景。微信钱已扣，转补偿：登记后由定时任务复活订单。
+      throw new SettlementFailedNeedsCompensation({
+        orderId: payment.orderId,
+        payNo: payment.payNo,
+        amountFen,
+        transactionId: input.transactionId,
+        presetReason: COMPENSATION_REASON_CANCELLED,
+        cause: new ConflictException('订单不在待支付状态'),
+      });
+    }
+    const settler = this.settler;
+    if (becameSuccess && order.status === ORDER_PENDING_PAYMENT && !settler) {
+      throw new InternalServerErrorException('订单结算未就绪');
+    }
+    await tx.payment.update({
+      where: { id: payment.id },
+      data: {
+        status: next,
+        updatedAt: now,
+        activeSlot: null,
+        ...(becameSuccess ? { succeededAt: now } : {}),
+        ...(becameSuccess && input.transactionId ? { channelTradeNo: input.transactionId } : {}),
+      },
+    });
+    let orderStatus = order.status;
+    if (becameSuccess && order.status === ORDER_PENDING_PAYMENT && settler) {
+      try {
+        orderStatus = await settler.settleWechatSuccess(tx, order.id, now);
+      } catch (error) {
+        throw new SettlementFailedNeedsCompensation({
+          orderId: order.id,
+          payNo: payment.payNo,
           amountFen,
-          succeededAt,
-          current,
-          next,
-        );
+          transactionId: input.transactionId,
+          cause: error,
+        });
       }
-      if (payment.orderId === null) {
-        throw new NotFoundException('订单不存在');
-      }
-      const order = await lockOrder(tx, payment.orderId);
+    } else if (becameFailed && settler) {
+      await settler.releaseWechatFailure(tx, order.id, now);
+    }
+    return toPaymentResult(
+      {
+        payNo: payment.payNo,
+        status: next,
+        orderId: payment.orderId,
+        amountFen,
+        succeededAt: becameSuccess ? now : succeededAt,
+      },
+      orderStatus,
+    );
+  }
+
+  /**
+   * 结算失败的登记。在独立事务里做三件事：
+   * 1. 把支付单标成 success——钱确实收到了，不能再让用户重复支付；
+   * 2. 微信实收补记现金流水（幂等，后续结算成功不会重复记）；
+   * 3. 建/更新结算补偿记录，按失败原因分类，交给定时任务或人工。
+   */
+  private async recordSettlementCompensation(
+    signal: SettlementFailedNeedsCompensation,
+  ): Promise<WechatPaymentResult> {
+    const now = await this.clock.now();
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`
+        SELECT id FROM orders WHERE id = ${signal.orderId} FOR UPDATE
+      `;
+      const order = await tx.order.findUnique({ where: { id: signal.orderId } });
       if (!order) {
         throw new NotFoundException('订单不存在');
       }
-      if (next === current) {
-        return toPaymentResult({ ...payment, amountFen, succeededAt }, order.status);
+      const payment = await tx.payment.findUnique({ where: { payNo: signal.payNo } });
+      if (payment && payment.status === 'pending') {
+        await tx.payment.update({
+          where: { id: payment.id },
+          data: {
+            status: 'success',
+            updatedAt: now,
+            activeSlot: null,
+            succeededAt: now,
+            ...(signal.transactionId ? { channelTradeNo: signal.transactionId } : {}),
+          },
+        });
       }
-      const becameSuccess = next === 'success';
-      const becameFailed = next === 'failed' && current === 'pending';
-      if (
-        becameSuccess &&
-        order.status !== ORDER_PENDING_PAYMENT &&
-        order.status !== ORDER_PAID &&
-        order.status !== ORDER_SHIPPED
-      ) {
-        throw new ConflictException('订单不在待支付状态');
+      if (this.cash && signal.amountFen > 0) {
+        await this.cash.recordInflow(tx, {
+          amountFen: BigInt(signal.amountFen),
+          bizType: CASH_ORDER_WECHAT,
+          bizId: order.id.toString(),
+          occurredAt: now,
+        });
       }
-      const settler = this.settler;
-      if (becameSuccess && order.status === ORDER_PENDING_PAYMENT && !settler) {
-        throw new InternalServerErrorException('订单结算未就绪');
-      }
-      await tx.payment.update({
-        where: { id: payment.id },
-        data: {
-          status: next,
-          updatedAt: now,
-          activeSlot: null,
-          ...(becameSuccess ? { succeededAt: now } : {}),
-          ...(becameSuccess && input.transactionId ? { channelTradeNo: input.transactionId } : {}),
-        },
+      const existing = await tx.settlementCompensation.findUnique({
+        where: { orderId: order.id },
       });
-      let orderStatus = order.status;
-      if (becameSuccess && order.status === ORDER_PENDING_PAYMENT && settler) {
-        orderStatus = await settler.settleWechatSuccess(tx, order.id, now);
-      } else if (becameFailed && settler) {
-        await settler.releaseWechatFailure(tx, order.id, now);
+      const reason = signal.presetReason ?? classifySettlementError(signal.cause).reason;
+      const lastError = readCauseMessage(signal.cause);
+      if (existing) {
+        if (existing.status !== COMPENSATION_COMPLETED && existing.status !== COMPENSATION_REFUNDED) {
+          await tx.settlementCompensation.update({
+            where: { id: existing.id },
+            data: {
+              failReason: reason,
+              status: COMPENSATION_AUTO_RETRY,
+              wechatTradeNo: signal.transactionId ?? existing.wechatTradeNo,
+              lastError,
+              updatedAt: now,
+            },
+          });
+        }
+      } else {
+        await tx.settlementCompensation.create({
+          data: {
+            orderId: order.id,
+            payNo: signal.payNo,
+            userId: order.userId,
+            zone: order.zone,
+            wechatTradeNo: signal.transactionId,
+            amountFen: signal.amountFen,
+            failReason: reason,
+            status: COMPENSATION_AUTO_RETRY,
+            retryCount: 0,
+            lastError,
+            createdAt: now,
+            updatedAt: now,
+          },
+        });
       }
       return toPaymentResult(
         {
-          payNo: payment.payNo,
-          status: next,
-          orderId: payment.orderId,
-          amountFen,
-          succeededAt: becameSuccess ? now : succeededAt,
+          payNo: signal.payNo,
+          status: 'success',
+          orderId: order.id,
+          amountFen: signal.amountFen,
+          succeededAt: now,
         },
-        orderStatus,
+        order.status,
       );
     });
   }
@@ -737,6 +880,15 @@ function createPayNo(now: Date): string {
   const time = now.getTime().toString(36).toUpperCase();
   const rand = randomBytes(8).toString('hex').toUpperCase();
   return `W${time}${rand}`.slice(0, 32);
+}
+
+function readCauseMessage(cause: unknown): string {
+  const raw =
+    typeof cause === 'object' && cause !== null && 'message' in cause
+      ? String((cause as { message?: unknown }).message ?? '')
+      : '';
+  const message = raw.trim() || '结算失败';
+  return message.slice(0, 255);
 }
 
 function normalizeInstant(clock: ClockService, value: Date | string | null): Date | null {

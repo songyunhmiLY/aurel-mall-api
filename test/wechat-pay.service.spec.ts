@@ -60,6 +60,9 @@ interface MemoryDb {
   };
   $transaction: <T>(fn: (tx: MemoryDb) => Promise<T>) => Promise<T>;
   $queryRaw: (strings: TemplateStringsArray, ...values: unknown[]) => Promise<unknown[]>;
+  settlementCompensation: {
+    findFirst: (args: unknown) => Promise<null>;
+  };
 }
 
 function memoryDb(): MemoryDb {
@@ -145,6 +148,9 @@ function memoryDb(): MemoryDb {
         return row ? [{ id: row.id, status: row.status }] : [];
       }
       throw new Error(`unexpected sql: ${sql}`);
+    },
+    settlementCompensation: {
+      findFirst: async () => null,
     },
   };
   return api;

@@ -7,6 +7,7 @@ import { TreesModule } from '../rewards/trees/trees.module';
 import { WalletModule } from '../wallet/wallet.module';
 import { AdminOrdersController } from './admin-orders.controller';
 import { AdminRefundsController } from './admin-refunds.controller';
+import { AdminSettlementCompensationsController } from './admin-settlement-compensations.controller';
 import { OrderPaymentSettler } from './order-payment.settler';
 import { PendingSettlementHook } from './order-paid.hook';
 import { OrdersController } from './orders.controller';
@@ -14,6 +15,7 @@ import { OrdersService } from './orders.service';
 import { PaymentSettlementHook } from './payment-settlement.hook';
 import { RefundsController } from './refunds.controller';
 import { RefundsService } from './refunds.service';
+import { SettlementCompensationService } from './settlement-compensation.service';
 
 @Module({
   imports: [
@@ -24,14 +26,27 @@ import { RefundsService } from './refunds.service';
     RewardsModule,
     forwardRef(() => PaymentsModule),
   ],
-  controllers: [OrdersController, AdminOrdersController, RefundsController, AdminRefundsController],
+  controllers: [
+    OrdersController,
+    AdminOrdersController,
+    RefundsController,
+    AdminRefundsController,
+    AdminSettlementCompensationsController,
+  ],
   providers: [
     OrdersService,
     OrderPaymentSettler,
     PaymentSettlementHook,
     { provide: PendingSettlementHook, useExisting: PaymentSettlementHook },
     RefundsService,
+    SettlementCompensationService,
   ],
-  exports: [OrdersService, OrderPaymentSettler, PendingSettlementHook, RefundsService],
+  exports: [
+    OrdersService,
+    OrderPaymentSettler,
+    PendingSettlementHook,
+    RefundsService,
+    SettlementCompensationService,
+  ],
 })
 export class OrdersModule {}

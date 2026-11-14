@@ -178,10 +178,16 @@ describe('orders and forced payment', () => {
     expect((await stage.orders.getForUser(buyer, failed.id)).status).toBe('closed');
     expect((await stage.wallet.getBalances(buyer)).withdrawable.frozenFen).toBe(0n);
     expect(debits(stage.db, buyer, 'withdrawable')).toHaveLength(0);
-    await expect(stage.wechatPay.simulateSuccess(restarted.wechat!.payNo)).rejects.toBeInstanceOf(
-      ConflictException,
-    );
+    // 迟到的成功回调不再直接拒绝：微信钱已扣，登记补偿，等重试复活订单
+    await stage.wechatPay.simulateSuccess(restarted.wechat!.payNo);
+    expect(stage.db.settlementCompensation.rows).toHaveLength(1);
+    expect(stage.db.settlementCompensation.rows[0]).toMatchObject({
+      orderId: failed.id,
+      status: 'auto_retry',
+      failReason: 'order_cancelled',
+    });
     expect(marketNode(stage.db, buyer)).toBeNull();
+    expect(stage.hook.events).toHaveLength(0);
 
     const timed = await stage.orders.create(buyer, {
       zone: PRODUCT_ZONE_STARTUP,

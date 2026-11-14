@@ -383,6 +383,7 @@ export class Stage1Db {
   readonly withdrawalDisplaySource = new MemoryTable([['sourceCode']]);
   readonly cashLedgerEntry = new MemoryTable([]);
   readonly orderRefund = new MemoryTable([['wechatRefundNo']]);
+  readonly settlementCompensation = new MemoryTable([['orderId']]);
   readonly rewardLedgerEntry = new MemoryTable([['userId', 'rewardType', 'bizType', 'bizId']]);
   readonly startupSubOrder = new MemoryTable([]);
   readonly filing = new MemoryTable([
@@ -554,6 +555,7 @@ export class Stage1Db {
       this.withdrawalDisplaySource,
       this.cashLedgerEntry,
       this.orderRefund,
+      this.settlementCompensation,
       this.rewardLedgerEntry,
       this.startupSubOrder,
       this.filing,

@@ -7,6 +7,7 @@ import {
   type OrderPaidEvent,
 } from '../../src/modules/orders/order-paid.hook';
 import { OrdersService } from '../../src/modules/orders/orders.service';
+import { SettlementCompensationService } from '../../src/modules/orders/settlement-compensation.service';
 import type { WechatPayGateway } from '../../src/modules/payments/wechat-pay.gateway';
 import type {
   WechatPayCredentials,
@@ -66,8 +67,19 @@ export function buildStage2(unitPriceFen = 1000) {
     gateway as unknown as WechatPayGateway,
     env,
     settlement,
+    undefined,
+    cash,
   );
   const orders = new OrdersService(prisma, clock, wallet, trees, settlement, wechatPay, env.locked);
+  const compensations = new SettlementCompensationService(
+    prisma,
+    clock,
+    wallet,
+    settlement,
+    cash,
+    paySettings as unknown as WechatPaySettingsService,
+    gateway as unknown as WechatPayGateway,
+  );
   return {
     ...stage1,
     env,
@@ -77,6 +89,7 @@ export function buildStage2(unitPriceFen = 1000) {
     settlement,
     wechatPay,
     orders,
+    compensations,
     gateway,
     paySettings,
   };
