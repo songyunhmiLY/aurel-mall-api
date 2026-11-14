@@ -1,7 +1,7 @@
 import { BadRequestException, Injectable, InternalServerErrorException } from '@nestjs/common';
 import { randomBytes } from 'node:crypto';
 import type { MarketTreeNode, Prisma } from '@prisma/client';
-import { isUniqueConflict } from '../../../common/prisma/prisma-errors';
+import { isUniqueConflict, uniqueConflictTargets } from '../../../common/prisma/prisma-errors';
 import { ROOT_INVITE_CODE } from '../../users/identity.constants';
 import {
   MARKET_TREE_MAX_PATH_LENGTH,
@@ -87,10 +87,17 @@ export class TreesService {
             },
           });
         } catch (error) {
-          if (isUniqueConflict(error)) {
-            continue;
+          if (!isUniqueConflict(error)) {
+            throw error;
           }
-          throw error;
+          if (isUserSeatConflict(error)) {
+            // 同一用户两笔并发支付：另一笔已经把他放进树里了。
+            // 这里收敛成「已入座」，不能当成槽位被抢去换下一个槽位。
+            await this.markSeated(tx, userId, now);
+            return;
+          }
+          // 槽位被别人抢了，换下一个。
+          continue;
         }
         placed = true;
         break;
@@ -220,8 +227,20 @@ export class TreesService {
   }
 }
 
-async function allocateInviteCode(tx: Tx): Promise<string> {
-  for (let attempt = 0; attempt < 20; attempt += 1) {
+/**
+ * 唯一冲突是不是「这个用户已经有席位」。
+ *
+ * userId 唯一索引和 (parent_user_id, slot) 唯一索引都会抛 P2002，必须分开看：
+ * 前者说明已经入过座（并发支付、或重复支付），后者才是槽位被抢。
+ * 读不到索引名时返回 false，退化成「槽位被抢」去重试，不会误判成已入座。
+ */
+export function isUserSeatConflict(error: unknown): boolean {
+  return uniqueConflictTargets(error).some(
+    (target) => target === 'market_tree_user_id_uq' || target === 'user_id',
+  );
+}
+
+async function allocateInviteCode(tx: Tx): Promise<string> {  for (let attempt = 0; attempt < 20; attempt += 1) {
     const inviteCode = randomSixDigitCode();
     if (inviteCode === ROOT_INVITE_CODE) {
       continue;

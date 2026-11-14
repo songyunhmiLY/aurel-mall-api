@@ -8,6 +8,25 @@ export function isUniqueConflict(error: unknown): boolean {
   return isPrismaErrorCode(error, 'P2002');
 }
 
+/**
+ * P2002 冲突落在哪个索引上。
+ * MySQL 下 Prisma 把索引名放进 meta.target，字段联合索引偶尔给字段数组，
+ * 两种形态都要能读。读不到时返回空数组，调用方按“不知道”处理。
+ */
+export function uniqueConflictTargets(error: unknown): string[] {
+  if (!isUniqueConflict(error)) {
+    return [];
+  }
+  const target = (error as { meta?: { target?: unknown } }).meta?.target;
+  if (Array.isArray(target)) {
+    return target.map((item) => String(item));
+  }
+  if (typeof target === 'string') {
+    return [target];
+  }
+  return [];
+}
+
 /** P2028 事务超时。 */
 export function isTransactionTimeout(error: unknown): boolean {
   return isPrismaErrorCode(error, 'P2028');

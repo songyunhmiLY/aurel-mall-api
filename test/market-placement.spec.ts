@@ -1,3 +1,4 @@
+import { isUserSeatConflict } from '../src/modules/rewards/trees/trees.service';
 import {
   buildStage2,
   graftMarket,
@@ -129,5 +130,48 @@ describe('market seating', () => {
     expect(marketNode(stage.db, nested)?.parentUserId).toBe(8600n);
     expect(parentChain(stage.db, nested)).toEqual([8600n, fullInviter, rootId]);
     expect(marketNode(stage.db, nested)?.parentUserId).not.toBe(rootId);
+  });
+
+  it('keeps the first seat when the same user pays the startup zone again', async () => {
+    const stage = buildStage2();
+    await stage.users.onModuleInit();
+    const rootId = stage.db.user.rows.find((row) => row.inviteCode === '000000')!.id;
+    const buyer = await loginBuyer(stage, 'repeat', rootId);
+
+    stage.clock.current = at(1);
+    await seatUnder(stage, buyer);
+    const first = marketNode(stage.db, buyer);
+    expect(first?.parentUserId).toBe(rootId);
+    expect(first?.slot).toBe(1);
+
+    // 把上级剩下两个位置占满，再让同一个人支付一次创业专区。
+    graftMarket(stage.db, 8801n, rootId, at(10));
+    graftMarket(stage.db, 8802n, rootId, at(11));
+    stage.clock.current = at(20);
+    await seatUnder(stage, buyer);
+
+    const after = marketNode(stage.db, buyer);
+    expect(after?.id).toBe(first?.id);
+    expect(after?.parentUserId).toBe(rootId);
+    expect(after?.slot).toBe(1);
+    expect(after?.depth).toBe(first?.depth);
+    expect(stage.db.marketTreeNode.rows.filter((row) => row.userId === buyer)).toHaveLength(1);
+  });
+});
+
+describe('seat conflict routing', () => {
+  it('reads the user unique index as already seated and the slot index as retry', () => {
+    expect(isUserSeatConflict({ code: 'P2002', meta: { target: 'market_tree_user_id_uq' } })).toBe(
+      true,
+    );
+    expect(isUserSeatConflict({ code: 'P2002', meta: { target: ['user_id'] } })).toBe(true);
+    expect(
+      isUserSeatConflict({ code: 'P2002', meta: { target: 'market_tree_parent_slot_uq' } }),
+    ).toBe(false);
+    expect(
+      isUserSeatConflict({ code: 'P2002', meta: { target: ['parent_user_id', 'slot'] } }),
+    ).toBe(false);
+    expect(isUserSeatConflict({ code: 'P2002', meta: {} })).toBe(false);
+    expect(isUserSeatConflict(new Error('boom'))).toBe(false);
   });
 });
