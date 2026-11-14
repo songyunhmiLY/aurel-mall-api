@@ -175,3 +175,51 @@ describe('locked runtime config', () => {
     ).toThrow(/重复/);
   });
 });
+
+describe('cors and secret hardening', () => {
+  it('keeps CORS off when no origin is listed', () => {
+    expect(parseAppEnv({ ...example, CORS_ORIGINS: '' }).corsOrigins).toEqual([]);
+  });
+
+  it('accepts a comma separated origin list and strips trailing slashes', () => {
+    const env = parseAppEnv({
+      ...example,
+      CORS_ORIGINS: 'http://localhost:5173/, https://admin.example.com',
+    });
+    expect(env.corsOrigins).toEqual(['http://localhost:5173', 'https://admin.example.com']);
+  });
+
+  it('rejects wildcard and path or protocol violations', () => {
+    expect(() => parseAppEnv({ ...example, CORS_ORIGINS: '*' })).toThrow(/通配符/);
+    expect(() => parseAppEnv({ ...example, CORS_ORIGINS: 'https://a.com/api' })).toThrow(
+      /不能带路径/,
+    );
+    expect(() => parseAppEnv({ ...example, CORS_ORIGINS: 'file:///tmp' })).toThrow(/协议/);
+  });
+
+  it('refuses placeholder secrets in production', () => {
+    expect(() =>
+      parseAppEnv({
+        ...example,
+        NODE_ENV: 'production',
+        JWT_ADMIN_SECRET: 'dev-admin-jwt-placeholder',
+      }),
+    ).toThrow(/示例值/);
+    expect(() =>
+      parseAppEnv({
+        ...example,
+        NODE_ENV: 'production',
+        MINI_PROGRAM_TOKEN_SECRET: 'dev-mini-program-placeholder',
+      }),
+    ).toThrow(/示例值/);
+  });
+
+  it('requires long secrets in production and allows short ones in development', () => {
+    expect(() =>
+      parseAppEnv({ ...example, NODE_ENV: 'production', JWT_ADMIN_SECRET: 'short-but-unique' }),
+    ).toThrow(/长度至少 32/);
+    expect(() =>
+      parseAppEnv({ ...example, NODE_ENV: 'development', JWT_ADMIN_SECRET: 'short-but-unique' }),
+    ).not.toThrow();
+  });
+});

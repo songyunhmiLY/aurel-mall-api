@@ -1,4 +1,5 @@
 import { Body, Controller, HttpCode, Post, UseGuards } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { MiniProgramTokenGuard } from '../../common/auth/mini-program-token.guard';
 import type { UserPrincipal } from '../../common/auth/user-principal';
 import { CurrentUser } from '../../common/auth/current-user.decorator';
@@ -14,12 +15,14 @@ export class AuthController {
 
   @Post('mini/login')
   @HttpCode(200)
+  @Throttle({ default: { ttl: 60_000, limit: 20 } })
   miniLogin(@Body() body: MiniLoginDto) {
     return this.users.loginWithMiniProgram(body.code);
   }
 
   @Post('preview/login')
   @HttpCode(200)
+  @Throttle({ default: { ttl: 60_000, limit: 20 } })
   @UseGuards(PreviewAuthEnabledGuard)
   previewLogin(@Body() body: PreviewLoginDto) {
     return this.users.loginPreview(body.subject);

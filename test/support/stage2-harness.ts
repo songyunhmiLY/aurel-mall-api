@@ -14,6 +14,7 @@ import type {
 } from '../../src/modules/payments/wechat-pay-settings.service';
 import { WechatPayService } from '../../src/modules/payments/wechat-pay.service';
 import { TreesService } from '../../src/modules/rewards/trees/trees.service';
+import { CashLedgerService } from '../../src/modules/wallet/cash-ledger.service';
 import { WalletService } from '../../src/modules/wallet/wallet.service';
 import { Stage1Db } from './stage1-db';
 import { buildStage1, lockedConfig, stage1Env } from './stage1-harness';
@@ -38,7 +39,8 @@ export function buildStage2(unitPriceFen = 1000) {
   const wallet = new WalletService(prisma, clock);
   const trees = new TreesService();
   const hook = new RecordingHook();
-  const settlement = new OrderPaymentSettler(wallet, trees, hook);
+  const cash = new CashLedgerService();
+  const settlement = new OrderPaymentSettler(wallet, trees, hook, cash);
   const paySettings: {
     credentials: WechatPayCredentials | null;
     readCredentials(): Promise<WechatPayCredentials | null>;
@@ -131,14 +133,49 @@ export function graftMarket(
   if (!parent) {
     throw new Error('missing market parent');
   }
+  const siblings = db.marketTreeNode.rows.filter((row) => row.parentUserId === parentUserId);
+  const used = new Set(siblings.map((row) => Number(row.slot)));
+  let slot = 1;
+  while (used.has(slot)) {
+    slot += 1;
+  }
+  const path = `${String(parent.path)}${userId.toString()}/`;
   db.marketTreeNode.create({
     data: {
       userId,
       parentUserId,
+      slot,
+      childCount: 0,
       depth: Number(parent.depth) + 1,
-      path: `${String(parent.path)}${userId.toString()}/`,
+      path,
       placedAt,
     },
+  });
+  db.marketTreeOpenSlot.deleteMany({ where: { parentUserId } });
+  db.marketTreeNode.update({
+    where: { userId: parentUserId },
+    data: { childCount: Number(parent.childCount ?? 0) + 1 },
+  });
+  const free = [1, 2, 3].filter((candidate) => !used.has(candidate) && candidate !== slot);
+  if (free.length > 0) {
+    db.marketTreeOpenSlot.createMany({
+      data: free.map((candidate) => ({
+        parentUserId,
+        slot: candidate,
+        parentDepth: Number(parent.depth),
+        parentPath: String(parent.path),
+        openCount: free.length,
+      })),
+    });
+  }
+  db.marketTreeOpenSlot.createMany({
+    data: [1, 2, 3].map((candidate) => ({
+      parentUserId: userId,
+      slot: candidate,
+      parentDepth: Number(parent.depth) + 1,
+      parentPath: path,
+      openCount: 3,
+    })),
   });
 }
 

@@ -3,7 +3,7 @@ import { buildStage1 } from './support/stage1-harness';
 
 const VALID_KYC = {
   realName: '张三',
-  idNumber: '11010119900307888x',
+  idNumber: '110101199003078881',
   mobile: '13800138000',
 };
 
@@ -25,6 +25,12 @@ describe('kyc and shipping addresses', () => {
     await expect(
       kyc.submit(userId, { ...VALID_KYC, idNumber: '11010119900307888Y' }),
     ).rejects.toBeInstanceOf(BadRequestException);
+    await expect(
+      kyc.submit(userId, { ...VALID_KYC, idNumber: '110101199003078882' }),
+    ).rejects.toThrow('身份证号校验位不正确');
+    await expect(
+      kyc.submit(userId, { ...VALID_KYC, idNumber: '110101199002308881' }),
+    ).rejects.toThrow('身份证号内的出生日期不正确');
     await expect(kyc.submit(userId, { ...VALID_KYC, mobile: '12345' })).rejects.toThrow(
       '手机号格式不正确',
     );
@@ -35,18 +41,18 @@ describe('kyc and shipping addresses', () => {
       verified: true,
       status: 'verified',
       realName: '张三',
-      idNumber: '11010119900307888X',
+      idNumber: '110101199003078881',
       mobile: '13800138000',
     });
     expect(await kyc.isVerified(userId)).toBe(true);
-    expect(await kyc.getForUser(userId)).toMatchObject({ idNumber: '11010119900307888X' });
+    expect(await kyc.getForUser(userId)).toMatchObject({ idNumber: '110101199003078881' });
 
     const replaced = await kyc.submit(userId, { ...VALID_KYC, realName: '李四' });
     expect(replaced.realName).toBe('李四');
     expect(await adminUsers.getKyc(userId)).toMatchObject({
       verified: true,
       realName: '李四',
-      idNumber: '11010119900307888X',
+      idNumber: '110101199003078881',
     });
   });
 

@@ -1,3 +1,4 @@
+import { nonOrderCashRows } from './support/stage1-db';
 import { ConflictException, ForbiddenException } from '@nestjs/common';
 import type { ClockService } from '../src/common/clock/clock.service';
 import type { PrismaService } from '../src/common/prisma/prisma.service';
@@ -25,7 +26,7 @@ import {
 
 const KYC = {
   realName: '张三',
-  idNumber: '11010119900307888X',
+  idNumber: '110101199003078881',
   mobile: '13800138000',
 };
 
@@ -197,7 +198,7 @@ describe('stage 3 wallets, transfers, withdrawals, and mall refunds', () => {
       balanceFen: 20_000n,
       frozenFen: 0n,
     });
-    expect(stage.db.cashLedgerEntry.rows).toEqual([
+    expect(nonOrderCashRows(stage.db)).toEqual([
       expect.objectContaining({
         direction: 'outflow',
         amountFen: 9_700n,
@@ -416,7 +417,7 @@ describe('stage 3 wallets, transfers, withdrawals, and mall refunds', () => {
     expect((await stage.wallet.getBalances(buyer)).withdrawable.balanceFen).toBe(5_000n);
     expect((await stage.orders.getForUser(buyer, created.id)).status).toBe('paid');
     expect(stage.db.rewardLedgerEntry.rows).toEqual([reward]);
-    expect(stage.db.cashLedgerEntry.rows).toEqual([
+    expect(nonOrderCashRows(stage.db)).toEqual([
       expect.objectContaining({
         bizType: 'wechat_refund',
         amountFen: 2_000n,
@@ -503,7 +504,7 @@ describe('stage 3 wallets, transfers, withdrawals, and mall refunds', () => {
     };
     await expect(refunds.approve(applied.id, 1n, { refundFen: 2_000 })).rejects.toThrow('down');
     expect((await refunds.getForUser(buyer, applied.id)).status).toBe('pending');
-    expect(stage.db.cashLedgerEntry.rows).toHaveLength(0);
+    expect(nonOrderCashRows(stage.db)).toHaveLength(0);
 
     stage.gateway.createDomesticRefund.mockResolvedValueOnce({
       refundId: 'wx-refund',
@@ -524,7 +525,7 @@ describe('stage 3 wallets, transfers, withdrawals, and mall refunds', () => {
       1,
       expect.objectContaining({ outRefundNo: `RF${applied.id.toString()}` }),
     );
-    expect(stage.db.cashLedgerEntry.rows[0]).toMatchObject({
+    expect(nonOrderCashRows(stage.db)[0]).toMatchObject({
       amountFen: 2_000n,
       bizType: 'wechat_refund',
     });
@@ -581,7 +582,7 @@ describe('stage 3 wallets, transfers, withdrawals, and mall refunds', () => {
       wechatRefundNo: `RF${applied.id.toString()}`,
       wechatRefundFen: 2_000,
     });
-    expect(stage.db.cashLedgerEntry.rows).toHaveLength(0);
+    expect(nonOrderCashRows(stage.db)).toHaveLength(0);
 
     const approved = await refunds.approve(applied.id, 1n, { refundFen: 2_000 });
     expect(stage.gateway.createDomesticRefund).toHaveBeenCalledTimes(1);
@@ -590,7 +591,7 @@ describe('stage 3 wallets, transfers, withdrawals, and mall refunds', () => {
       wechatRefundStatus: 'accepted',
       wechatRefundFen: 2_000,
     });
-    expect(stage.db.cashLedgerEntry.rows).toHaveLength(1);
+    expect(nonOrderCashRows(stage.db)).toHaveLength(1);
 
     const again = await refunds.apply(buyer, secondOrder.id);
     stage.gateway.createDomesticRefund.mockRejectedValueOnce(new WechatRefundAlreadyAccepted());

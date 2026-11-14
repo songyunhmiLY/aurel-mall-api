@@ -64,6 +64,8 @@ export const CASH_WECHAT_REFUND = 'wechat_refund';
 export const CASH_WITHDRAWAL_PAYOUT = 'withdrawal_payout';
 /** 联合创始人开通的微信收款。不是商品销售。 */
 export const CASH_COFOUNDER_ACTIVATION = 'cofounder_activation';
+/** 商品订单的微信实收。按订单记一笔，bizId 用订单 id。 */
+export const CASH_ORDER_WECHAT = 'order_wechat';
 
 export function isWalletType(value: string): value is WalletType {
   return (WALLET_TYPES as readonly string[]).includes(value);

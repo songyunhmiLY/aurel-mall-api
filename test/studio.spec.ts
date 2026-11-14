@@ -1,3 +1,4 @@
+import { nonOrderCashRows } from './support/stage1-db';
 import {
   BadRequestException,
   ConflictException,
@@ -164,7 +165,7 @@ describe('studio subsidy', () => {
     expect(stage.db.walletLedgerEntry.rows.filter((row) => row.bizType === 'studio')).toHaveLength(
       0,
     );
-    expect(stage.db.cashLedgerEntry.rows).toHaveLength(0);
+    expect(nonOrderCashRows(stage.db)).toHaveLength(0);
 
     const again = await stage.studioEnrollment.appoint(members[0]!, 8n);
     expect(again.status).toBe('active');
@@ -442,7 +443,7 @@ describe('studio subsidy', () => {
     expect(stage.db.cofounderEnrollment.rows.filter((row) => row.status === 'active')).toHaveLength(
       2,
     );
-    expect(stage.db.cashLedgerEntry.rows).toHaveLength(0);
+    expect(nonOrderCashRows(stage.db)).toHaveLength(0);
 
     const ops = new OpsOverviewService(
       stage.db as never,

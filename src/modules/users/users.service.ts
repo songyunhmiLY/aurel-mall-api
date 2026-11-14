@@ -15,6 +15,7 @@ import { ClockService } from '../../common/clock/clock.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import type { AppEnv } from '../../config/app-env';
 import { APP_ENV } from '../../config/tokens';
+import { MARKET_TREE_SLOTS } from '../rewards/trees/market-tree.constants';
 import {
   IDENTITY_PROVIDERS,
   LEGACY_ROOT_INVITE_CODE,
@@ -106,10 +107,21 @@ export class UsersService implements OnModuleInit {
           data: {
             userId: user.id,
             parentUserId: null,
+            slot: null,
+            childCount: 0,
             depth: 0,
             path,
             placedAt: now,
           },
+        });
+        await tx.marketTreeOpenSlot.createMany({
+          data: MARKET_TREE_SLOTS.map((slot) => ({
+            parentUserId: user.id,
+            slot,
+            parentDepth: 0,
+            parentPath: path,
+            openCount: MARKET_TREE_SLOTS.length,
+          })),
         });
       });
     } catch (error) {

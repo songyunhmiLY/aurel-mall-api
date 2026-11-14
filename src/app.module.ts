@@ -1,4 +1,6 @@
 import { Module } from '@nestjs/common';
+import { APP_GUARD } from '@nestjs/core';
+import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { ClockModule } from './common/clock/clock.module';
 import { PrismaModule } from './common/prisma/prisma.module';
 import { RedisModule } from './common/redis/redis.module';
@@ -10,6 +12,7 @@ import { CofounderModule } from './modules/cofounder/cofounder.module';
 import { OpsTeamModule } from './modules/ops-team/ops-team.module';
 import { StudioModule } from './modules/studio/studio.module';
 import { CmsModule } from './modules/cms/cms.module';
+import { FinanceModule } from './modules/finance/finance.module';
 import { HealthModule } from './modules/health/health.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { AdminModule } from './modules/admin/admin.module';
@@ -23,6 +26,9 @@ import { WalletModule } from './modules/wallet/wallet.module';
 
 @Module({
   imports: [
+    // 全局限流。登录、支付回调等敏感入口在各自的 controller 上用 @Throttle 收紧。
+    // 单机内存计数，多实例部署时应换成 Redis 存储。
+    ThrottlerModule.forRoot([{ name: 'default', ttl: 60_000, limit: 120 }]),
     AppConfigModule,
     PrismaModule,
     RedisModule,
@@ -37,6 +43,7 @@ import { WalletModule } from './modules/wallet/wallet.module';
     AdminModule,
     WalletModule,
     CmsModule,
+    FinanceModule,
     RewardsModule,
     SettingsModule,
     CofounderModule,
@@ -45,5 +52,6 @@ import { WalletModule } from './modules/wallet/wallet.module';
     OpsTeamModule,
     NotificationsModule,
   ],
+  providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })
 export class AppModule {}

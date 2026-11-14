@@ -89,7 +89,8 @@ export function buildStage4(locked: LockedRuntimeConfig = stage4Locked(), thresh
     opsTeamDividend,
   );
   const hook = new PaymentSettlementHook(paid);
-  const settlement = new OrderPaymentSettler(wallet, trees, hook);
+  const cash = new CashLedgerService();
+  const settlement = new OrderPaymentSettler(wallet, trees, hook, cash);
   const paySettings: {
     credentials: WechatPayCredentials | null;
     readCredentials(): Promise<WechatPayCredentials | null>;
@@ -113,7 +114,6 @@ export function buildStage4(locked: LockedRuntimeConfig = stage4Locked(), thresh
     settlement,
   );
   const orders = new OrdersService(prisma, clock, wallet, trees, settlement, wechatPay, locked);
-  const cash = new CashLedgerService();
   const cofounderEnrollment = new CofounderEnrollmentService(
     prisma,
     clock,

@@ -17,6 +17,7 @@ function env(allowClockOverride: boolean): AppEnv {
     wechatMiniAppId: null,
     wechatMiniAppSecret: null,
     miniProgramTokenSecret: 'test-secret-mini',
+    corsOrigins: [],
     adminBootstrapUsername: null,
     adminBootstrapPassword: null,
     adminBootstrapDisplayName: null,

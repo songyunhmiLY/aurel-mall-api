@@ -247,7 +247,7 @@ export class OrdersService {
         throw new NotFoundException('订单不存在');
       }
       if (fresh.wechatFen === 0) {
-        await this.settlement.finish(tx, orderId, now);
+        await this.settlement.finish(tx, orderId, now, 'wallet');
         return 'paid' as const;
       }
       return 'wechat' as const;

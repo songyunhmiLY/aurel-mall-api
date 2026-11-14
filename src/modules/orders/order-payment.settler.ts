@@ -3,7 +3,9 @@ import type { Prisma } from '@prisma/client';
 import { PRODUCT_ZONE_STARTUP } from '../catalog/catalog.constants';
 import { WECHAT_PAY_CHANNEL } from '../payments/wechat-pay.constants';
 import { TreesService } from '../rewards/trees/trees.service';
+import { CashLedgerService } from '../wallet/cash-ledger.service';
 import {
+  CASH_ORDER_WECHAT,
   HOLD_HELD,
   WALLET_CONSUMPTION,
   WALLET_POINTS,
@@ -16,6 +18,9 @@ import { PendingSettlementHook } from './order-paid.hook';
 
 type Tx = Prisma.TransactionClient;
 
+/** 这一单的钱从哪来。只有微信实收才进现金流水，余额抵扣是平台内部划转。 */
+export type PaidBy = 'wechat' | 'wallet';
+
 /**
  * 微信支付进入终态，或账户已足够支付时，完成或回滚订单。
  * 扣款、扣库存、入座和订单状态在同一个事务里。
@@ -26,6 +31,7 @@ export class OrderPaymentSettler {
     private readonly wallet: WalletService,
     private readonly trees: TreesService,
     private readonly hook: PendingSettlementHook,
+    private readonly cash: CashLedgerService,
   ) {}
 
   async settleWechatSuccess(tx: Tx, orderId: bigint, now: Date): Promise<string> {
@@ -45,7 +51,7 @@ export class OrderPaymentSettler {
     if (order.status !== ORDER_PENDING_PAYMENT) {
       throw new ConflictException('订单不在待支付状态');
     }
-    await this.finish(tx, order.id, now);
+    await this.finish(tx, order.id, now, 'wechat');
     return ORDER_PAID;
   }
 
@@ -53,7 +59,7 @@ export class OrderPaymentSettler {
     await this.wallet.releaseHolds(tx, orderId, now);
   }
 
-  async finish(tx: Tx, orderId: bigint, now: Date): Promise<void> {
+  async finish(tx: Tx, orderId: bigint, now: Date, paidBy: PaidBy): Promise<void> {
     const order = await tx.order.findUnique({ where: { id: orderId } });
     if (!order) {
       throw new NotFoundException('订单不存在');
@@ -70,6 +76,16 @@ export class OrderPaymentSettler {
       where: { id: order.id },
       data: { status: ORDER_PAID, paidAt: now, updatedAt: now },
     });
+    if (paidBy === 'wechat') {
+      // 需求 §16.1：订单微信实收必须进资金流水，不得漏记。
+      // 幂等靠 (direction, bizType, bizId)，重复回调不会重复记账。
+      await this.cash.recordInflow(tx, {
+        amountFen: BigInt(order.wechatFen),
+        bizType: CASH_ORDER_WECHAT,
+        bizId: order.id.toString(),
+        occurredAt: now,
+      });
+    }
     await this.hook.afterOrderPaid({
       tx,
       orderId: order.id,

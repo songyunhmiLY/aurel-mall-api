@@ -12,6 +12,7 @@ interface Filter {
   in?: unknown[];
   notIn?: unknown[];
   contains?: string;
+  startsWith?: string;
   gte?: unknown;
   gt?: unknown;
   lte?: unknown;
@@ -42,7 +43,9 @@ function isFilter(value: unknown): value is Filter {
   if (keys.length === 0) {
     return false;
   }
-  return keys.every((key) => ['in', 'notIn', 'contains', 'gte', 'gt', 'lte', 'lt'].includes(key));
+  return keys.every((key) =>
+    ['in', 'notIn', 'contains', 'startsWith', 'gte', 'gt', 'lte', 'lt'].includes(key),
+  );
 }
 
 function matches(row: Row, where: Record<string, unknown> | undefined): boolean {
@@ -68,6 +71,12 @@ function matches(row: Row, where: Record<string, unknown> | undefined): boolean 
       if (
         expected.contains !== undefined &&
         (typeof actual !== 'string' || !actual.includes(expected.contains))
+      ) {
+        return false;
+      }
+      if (
+        expected.startsWith !== undefined &&
+        (typeof actual !== 'string' || !actual.startsWith(expected.startsWith))
       ) {
         return false;
       }
@@ -210,7 +219,7 @@ class MemoryTable {
     if (index < 0 || !current) {
       throw coded('P2025');
     }
-    const next = this.materialize(current.id, { ...current, ...definedData(args.data) });
+    const next = this.materialize(current.id, { ...current, ...resolvedData(current, args.data) });
     this.assertUnique(next, current.id);
     this.rows[index] = next;
     return cloneRow(next);
@@ -225,7 +234,7 @@ class MemoryTable {
         return row;
       }
       count += 1;
-      return this.materialize(row.id, { ...row, ...definedData(args.data) });
+      return this.materialize(row.id, { ...row, ...resolvedData(row, args.data) });
     });
     return { count };
   }
@@ -273,7 +282,6 @@ class MemoryTable {
     }
     return row;
   }
-
   private assertUnique(row: Row, exceptId: bigint | null): void {
     for (const fields of this.uniques) {
       const key = uniqueKey(row, fields);
@@ -312,6 +320,26 @@ function definedData(data: Record<string, unknown>): Record<string, unknown> {
   return next;
 }
 
+/** 支持 Prisma 的 { increment } / { decrement } 写法。 */
+function resolvedData(
+  current: Row,
+  data: Record<string, unknown>,
+): Record<string, unknown> {
+  const next = definedData(data);
+  for (const [key, value] of Object.entries(next)) {
+    if (value === null || typeof value !== 'object' || value instanceof Date) {
+      continue;
+    }
+    const op = value as { increment?: number; decrement?: number };
+    if (typeof op.increment === 'number') {
+      next[key] = Number(current[key] ?? 0) + op.increment;
+    } else if (typeof op.decrement === 'number') {
+      next[key] = Number(current[key] ?? 0) - op.decrement;
+    }
+  }
+  return next;
+}
+
 function cloneRowOrNull(row: Row | null): Row | null {
   return row ? cloneRow(row) : null;
 }
@@ -329,7 +357,11 @@ export class Stage1Db {
   readonly userKyc = new MemoryTable([['userId']]);
   readonly userAddress = new MemoryTable([]);
   readonly inviteTreeNode = new MemoryTable([['userId']]);
-  readonly marketTreeNode = new MemoryTable([['userId']]);
+  readonly marketTreeNode = new MemoryTable([
+    ['userId'],
+    ['parentUserId', 'slot'],
+  ]);
+  readonly marketTreeOpenSlot = new MemoryTable([['parentUserId', 'slot']]);
   readonly product = new MemoryTable([]);
   readonly productSku = new MemoryTable([['skuCode']]);
   readonly skuStock = new MemoryTable([['skuId']]);
@@ -502,6 +534,7 @@ export class Stage1Db {
       this.userAddress,
       this.inviteTreeNode,
       this.marketTreeNode,
+      this.marketTreeOpenSlot,
       this.product,
       this.productSku,
       this.skuStock,
@@ -552,4 +585,12 @@ export class Stage1Db {
       this.ticker,
     ];
   }
+}
+
+/**
+ * 现金流水里排除商品订单的微信实收。
+ * 订单实收在 2026-11 之后由支付结算写入，断言退款、提现流水时要把它们排除。
+ */
+export function nonOrderCashRows(db: Stage1Db): Row[] {
+  return db.cashLedgerEntry.rows.filter((row) => row.bizType !== 'order_wechat');
 }

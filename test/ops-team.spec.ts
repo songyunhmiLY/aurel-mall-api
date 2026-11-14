@@ -1,3 +1,4 @@
+import { nonOrderCashRows } from './support/stage1-db';
 import {
   BadRequestException,
   ConflictException,
@@ -244,7 +245,7 @@ describe('ops team dividend', () => {
         (row) => row.userId === second && row.walletType === 'withdrawable',
       )?.balanceFen,
     ).toBe(balance);
-    expect(stage.db.cashLedgerEntry.rows).toHaveLength(0);
+    expect(nonOrderCashRows(stage.db)).toHaveLength(0);
     await expect(stage.opsTeamEnrollment.cancel(9n)).rejects.toBeInstanceOf(NotFoundException);
 
     const afterCancel = await buyStartup(stage, second, productId, 1);
@@ -467,7 +468,7 @@ describe('ops team dividend', () => {
         (row) => row.userId === holder && row.walletType === 'withdrawable',
       )?.balanceFen,
     ).toBe(balance);
-    expect(stage.db.cashLedgerEntry.rows).toHaveLength(0);
+    expect(nonOrderCashRows(stage.db)).toHaveLength(0);
   });
 
   it('still pays cofounder and studio on the same order and adds no overview card', async () => {

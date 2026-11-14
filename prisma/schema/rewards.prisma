@@ -13,18 +13,42 @@ model InviteTreeNode {
 }
 
 /// 市场树，与邀请树分开存储。有席位即会员。
-/// 每个节点最多 3 个下级。左右顺序用 placedAt（相同则用 id），不另存左中右字段。
+/// 每个节点最多 3 个下级，由 slot + 唯一索引在数据库层强制。
+/// slot 是内部槽位号（1..3），只用于并发正确性，不对外暴露，也不代表左中右。
+/// childCount 是已占用槽位数，入座时与 slot 同一事务维护。
 /// 启动时只为官方根账户写一行。其他用户在创业专区支付成功后入座。
 model MarketTreeNode {
   id           BigInt   @id @default(autoincrement())
   userId       BigInt   @unique(map: "market_tree_user_id_uq") @map("user_id")
   parentUserId BigInt?  @map("parent_user_id")
+  slot         Int?
+  childCount   Int      @default(0) @map("child_count")
   depth        Int
   path         String   @db.VarChar(2048)
   placedAt     DateTime @map("placed_at") @db.DateTime(3)
 
+  @@unique([parentUserId, slot], map: "market_tree_parent_slot_uq")
   @@index([parentUserId], map: "market_tree_parent_user_id_idx")
+  @@index([depth], map: "market_tree_depth_idx")
   @@map("market_tree_nodes")
+}
+
+/// 市场树空闲槽位的物化索引，只为「找一个空位」服务。
+/// 每个 childCount < 3 的节点在这里有 (3 - childCount) 行。
+/// 入座时删掉被占用的那一行，再为新节点插入 3 行。
+/// 有了这张表，找空位不必再从上级开始逐层 BFS（原来第 12 层要扫 53 万个节点）。
+model MarketTreeOpenSlot {
+  id           BigInt   @id @default(autoincrement())
+  parentUserId BigInt   @map("parent_user_id")
+  slot         Int
+  parentDepth  Int      @map("parent_depth")
+  parentPath   String   @map("parent_path") @db.VarChar(2048)
+  /// 该上级剩余空位数，和这个上级的行数相同。排序用，省掉一次分组计数。
+  openCount    Int      @map("open_count")
+
+  @@unique([parentUserId, slot], map: "market_tree_open_slot_uq")
+  @@index([parentDepth, openCount, parentPath(191)], map: "market_tree_open_slot_order_idx")
+  @@map("market_tree_open_slots")
 }
 
 /// 创业专区已支付的报单资格。每件商品的每 1 个数量、且单价等于当时的 N，写一行。

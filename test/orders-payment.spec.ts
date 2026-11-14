@@ -225,6 +225,16 @@ describe('orders and forced payment', () => {
     expect(stockOf(stage.db, product.skuId)).toBe(1);
     expect(stage.db.marketTreeNode.rows.filter((row) => row.userId === buyer)).toHaveLength(1);
     expect(stage.hook.events).toHaveLength(1);
+    // 重复回调只能记一笔微信实收（需求 §16.1）。
+    const orderInflows = stage.db.cashLedgerEntry.rows.filter(
+      (row) => row.bizType === 'order_wechat',
+    );
+    expect(orderInflows).toHaveLength(1);
+    expect(orderInflows[0]).toMatchObject({
+      direction: 'inflow',
+      amountFen: 250n,
+      bizId: created.id.toString(),
+    });
     expect(stage.db.user.rows.find((row) => row.id === buyer)).toMatchObject({
       member: true,
       seated: true,

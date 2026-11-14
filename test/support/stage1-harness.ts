@@ -60,6 +60,7 @@ export function stage1Env(overrides: Partial<AppEnv> = {}): AppEnv {
     allowPreviewAuth: false,
     adminJwtSecret: 'test-secret-admin',
     miniProgramTokenSecret: 'test-secret-mini',
+    corsOrigins: [],
     adminBootstrapUsername: null,
     adminBootstrapPassword: null,
     adminBootstrapDisplayName: null,

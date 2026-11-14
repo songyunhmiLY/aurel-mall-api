@@ -1,10 +1,13 @@
 import { BadRequestException, Injectable, InternalServerErrorException } from '@nestjs/common';
 import { randomBytes } from 'node:crypto';
 import type { MarketTreeNode, Prisma } from '@prisma/client';
+import { isUniqueConflict } from '../../../common/prisma/prisma-errors';
 import { ROOT_INVITE_CODE } from '../../users/identity.constants';
-
-const CHILD_SLOTS = 3;
-const MAX_PATH_LENGTH = 2048;
+import {
+  MARKET_TREE_MAX_PATH_LENGTH,
+  MARKET_TREE_SEAT_ATTEMPTS,
+  MARKET_TREE_SLOTS,
+} from './market-tree.constants';
 
 type Tx = Prisma.TransactionClient;
 
@@ -12,6 +15,10 @@ type Tx = Prisma.TransactionClient;
  * 创业专区支付成功后，从已有邀请上级往下找一个空位。
  * 不改邀请上级，也不处理报单和奖励。
  * 对外错误文案不使用“市场树”或“节点”。
+ *
+ * 空位来自 market_tree_open_slots：每个还没满 3 个孩子的节点在那里留一行。
+ * 这样找空位是一次带索引的小查询，不必从上级开始逐层 BFS。
+ * 「最多 3 个孩子」由 (parent_user_id, slot) 唯一索引兜底，代码不再依赖计数正确。
  */
 @Injectable()
 export class TreesService {
@@ -28,33 +35,137 @@ export class TreesService {
    * 新席位和用户上的会员标记在同一事务里写入。
    */
   async seat(tx: Tx, userId: bigint, now: Date): Promise<void> {
-    await tx.$queryRaw`
-      SELECT id FROM market_tree_nodes
-      WHERE parent_user_id IS NULL
-      FOR UPDATE
-    `;
     const existing = await tx.marketTreeNode.findUnique({ where: { userId } });
     if (existing) {
       await this.markSeated(tx, userId, now);
       return;
     }
     const inviter = await this.requireInviterSeat(tx, userId);
-    const parent = await this.chooseParent(tx, inviter);
-    const path = `${parent.path}${userId.toString()}/`;
-    if (path.length > MAX_PATH_LENGTH) {
-      throw new InternalServerErrorException('入座失败');
-    }
-    await tx.marketTreeNode.create({
-      data: {
-        userId,
-        parentUserId: parent.userId,
-        depth: parent.depth + 1,
-        path,
-        placedAt: now,
-      },
-    });
-    await this.markSeated(tx, userId, now);
+    await this.placeUnder(tx, userId, inviter, now);
     await this.assertUnderInviter(tx, userId, inviter.userId);
+  }
+
+  /**
+   * 抢槽位。按 1、2、3 顺序尝试插入，唯一索引决定谁抢到。
+   * 并发时被别的会话抢先占用会命中唯一索引，换下一个槽位即可，不会写出第 4 个孩子。
+   */
+  private async placeUnder(
+    tx: Tx,
+    userId: bigint,
+    inviter: MarketTreeNode,
+    now: Date,
+  ): Promise<void> {
+    const triedParents = new Set<string>();
+    for (let attempt = 0; attempt < MARKET_TREE_SEAT_ATTEMPTS; attempt += 1) {
+      const candidate = await this.findOpenSlot(tx, inviter.path, triedParents);
+      if (!candidate) {
+        throw new InternalServerErrorException('入座失败');
+      }
+      const parent = await tx.marketTreeNode.findUnique({
+        where: { userId: candidate.parentUserId },
+      });
+      if (!parent) {
+        triedParents.add(candidate.parentUserId.toString());
+        continue;
+      }
+      const path = `${parent.path}${userId.toString()}/`;
+      if (path.length > MARKET_TREE_MAX_PATH_LENGTH) {
+        throw new InternalServerErrorException('入座失败');
+      }
+      let placed = false;
+      for (const slot of MARKET_TREE_SLOTS) {
+        try {
+          await tx.marketTreeNode.create({
+            data: {
+              userId,
+              parentUserId: parent.userId,
+              slot,
+              childCount: 0,
+              depth: parent.depth + 1,
+              path,
+              placedAt: now,
+            },
+          });
+        } catch (error) {
+          if (isUniqueConflict(error)) {
+            continue;
+          }
+          throw error;
+        }
+        placed = true;
+        break;
+      }
+      if (!placed) {
+        triedParents.add(parent.userId.toString());
+        continue;
+      }
+      await this.refreshOpenSlots(tx, parent);
+      await tx.marketTreeOpenSlot.createMany({
+        data: MARKET_TREE_SLOTS.map((slot) => ({
+          parentUserId: userId,
+          slot,
+          parentDepth: parent.depth + 1,
+          parentPath: path,
+          openCount: MARKET_TREE_SLOTS.length,
+        })),
+      });
+      await tx.marketTreeNode.update({
+        where: { userId: parent.userId },
+        data: { childCount: { increment: 1 } },
+      });
+      await this.markSeated(tx, userId, now);
+      return;
+    }
+    throw new InternalServerErrorException('入座失败');
+  }
+
+  /**
+   * 按上级子树找最浅的一个还没满的节点。
+   * 路径形如 /1/5/9/，所以前缀匹配就能圈出整棵子树。
+   * 读到的是事务快照，可能比实际旧，因此调用方会按槽位逐个校验，必要时换下一个上级。
+   */
+  private findOpenSlot(
+    tx: Tx,
+    inviterPath: string,
+    triedParents: Set<string>,
+  ): Promise<{ parentUserId: bigint; slot: number } | null> {
+    const excluded = [...triedParents].map((value) => BigInt(value));
+    return tx.marketTreeOpenSlot.findFirst({
+      where: {
+        parentPath: { startsWith: inviterPath },
+        ...(excluded.length > 0 ? { parentUserId: { notIn: excluded } } : {}),
+      },
+      orderBy: [
+        { parentDepth: 'asc' },
+        { openCount: 'desc' },
+        { parentPath: 'asc' },
+        { slot: 'asc' },
+      ],
+      select: { parentUserId: true, slot: true },
+    });
+  }
+
+  /** 重建某个上级的空闲槽位行，让它们和实际占用对上。 */
+  private async refreshOpenSlots(tx: Tx, parent: MarketTreeNode): Promise<void> {
+    const children = await tx.marketTreeNode.findMany({
+      where: { parentUserId: parent.userId },
+      select: { slot: true },
+    });
+    const used = new Set(children.map((child) => child.slot));
+    await tx.marketTreeOpenSlot.deleteMany({ where: { parentUserId: parent.userId } });
+    const free = MARKET_TREE_SLOTS.filter((slot) => !used.has(slot));
+    if (free.length === 0) {
+      return;
+    }
+    await tx.marketTreeOpenSlot.createMany({
+      data: free.map((slot) => ({
+        parentUserId: parent.userId,
+        slot,
+        parentDepth: parent.depth,
+        parentPath: parent.path,
+        openCount: free.length,
+      })),
+    });
   }
 
   private async markSeated(tx: Tx, userId: bigint, now: Date): Promise<void> {
@@ -83,68 +194,29 @@ export class TreesService {
     return inviter;
   }
 
-  private async chooseParent(tx: Tx, inviter: MarketTreeNode): Promise<MarketTreeNode> {
-    let parents = [inviter];
-    const seen = new Set<string>([inviter.userId.toString()]);
-    for (let level = 0; level < 10_000; level += 1) {
-      const rows = await tx.marketTreeNode.findMany({
-        where: { parentUserId: { in: parents.map((node) => node.userId) } },
-      });
-      const groups = groupChildren(parents, rows);
-      let chosen: MarketTreeNode | null = null;
-      let chosenEmpty = 0;
-      for (let index = 0; index < parents.length; index += 1) {
-        const children = groups[index] ?? [];
-        const empty = CHILD_SLOTS - children.length;
-        if (empty <= 0) {
-          continue;
-        }
-        const parent = parents[index];
-        if (!parent) {
-          continue;
-        }
-        if (!chosen || empty > chosenEmpty) {
-          chosen = parent;
-          chosenEmpty = empty;
-        }
-      }
-      if (chosen) {
-        return chosen;
-      }
-      const next: MarketTreeNode[] = [];
-      for (const children of groups) {
-        for (const child of children) {
-          const key = child.userId.toString();
-          if (seen.has(key)) {
-            continue;
-          }
-          seen.add(key);
-          next.push(child);
-        }
-      }
-      if (next.length === 0) {
-        throw new InternalServerErrorException('入座失败');
-      }
-      parents = next;
+  /** 后置校验：新节点的路径必须以邀请上级的路径开头。原来逐级上溯，每级一次查询。 */
+  private async assertUnderInviter(tx: Tx, userId: bigint, inviterUserId: bigint): Promise<void> {
+    const node = await tx.marketTreeNode.findUnique({ where: { userId } });
+    const inviter = await tx.marketTreeNode.findUnique({ where: { userId: inviterUserId } });
+    if (!node || !inviter || !node.path.startsWith(inviter.path)) {
+      throw new InternalServerErrorException('入座失败');
     }
-    throw new InternalServerErrorException('入座失败');
   }
 
-  private async assertUnderInviter(tx: Tx, userId: bigint, inviterUserId: bigint): Promise<void> {
-    let current = userId;
-    const seen = new Set<string>();
-    while (current !== inviterUserId) {
-      const key = current.toString();
-      if (seen.has(key)) {
-        throw new InternalServerErrorException('入座失败');
-      }
-      seen.add(key);
-      const node = await tx.marketTreeNode.findUnique({ where: { userId: current } });
-      if (!node?.parentUserId) {
-        throw new InternalServerErrorException('入座失败');
-      }
-      current = node.parentUserId;
-    }
+  /**
+   * 从现有树重建空闲槽位表。只在数据被外部改过、槽位表对不上时手工执行。
+   * 不是入座热路径的一部分。
+   */
+  async rebuildOpenSlots(tx: Tx): Promise<number> {
+    await tx.marketTreeOpenSlot.deleteMany({});
+    return tx.$executeRaw`
+      INSERT INTO market_tree_open_slots
+        (parent_user_id, slot, parent_depth, parent_path, open_count)
+      SELECT node.user_id, position.slot, node.depth, node.path, 3 - node.child_count
+      FROM market_tree_nodes AS node
+      JOIN (SELECT 1 AS slot UNION ALL SELECT 2 UNION ALL SELECT 3) AS position
+        ON position.slot > node.child_count
+    `;
   }
 }
 
@@ -165,35 +237,4 @@ async function allocateInviteCode(tx: Tx): Promise<string> {
 function randomSixDigitCode(): string {
   const value = randomBytes(4).readUInt32BE(0) % 1_000_000;
   return value.toString().padStart(6, '0');
-}
-
-function groupChildren(parents: MarketTreeNode[], rows: MarketTreeNode[]): MarketTreeNode[][] {
-  const buckets = new Map<string, MarketTreeNode[]>();
-  for (const row of rows) {
-    if (row.parentUserId === null) {
-      continue;
-    }
-    const key = row.parentUserId.toString();
-    const list = buckets.get(key);
-    if (list) {
-      list.push(row);
-    } else {
-      buckets.set(key, [row]);
-    }
-  }
-  for (const list of buckets.values()) {
-    list.sort(compareSiblings);
-  }
-  return parents.map((parent) => buckets.get(parent.userId.toString()) ?? []);
-}
-
-function compareSiblings(left: MarketTreeNode, right: MarketTreeNode): number {
-  const placed = left.placedAt.getTime() - right.placedAt.getTime();
-  if (placed !== 0) {
-    return placed;
-  }
-  if (left.id === right.id) {
-    return 0;
-  }
-  return left.id < right.id ? -1 : 1;
 }

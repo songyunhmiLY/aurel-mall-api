@@ -10,6 +10,8 @@ export interface AppEnv {
   allowPreviewAuth: boolean;
   adminJwtSecret: string;
   miniProgramTokenSecret: string;
+  /** 允许跨域访问的前端源。为空表示只接受同源请求（生产建议用 nginx 反代）。 */
+  corsOrigins: string[];
   wechatMiniAppId: string | null;
   wechatMiniAppSecret: string | null;
   adminBootstrapUsername: string | null;
@@ -25,15 +27,18 @@ export function parseAppEnv(source: NodeJS.ProcessEnv): AppEnv {
   const redisUrl = readRequired(source, 'REDIS_URL');
   parseRedisUrl(redisUrl);
 
+  const nodeEnv = source.NODE_ENV?.trim() || 'development';
+
   return Object.freeze({
-    nodeEnv: source.NODE_ENV?.trim() || 'development',
+    nodeEnv,
     port: readPort(source),
     databaseUrl,
     redisUrl,
     allowClockOverride: readFlag(source, 'ALLOW_CLOCK_OVERRIDE'),
     allowPreviewAuth: readFlag(source, 'ALLOW_PREVIEW_AUTH'),
-    adminJwtSecret: readSecret(source, 'JWT_ADMIN_SECRET'),
-    miniProgramTokenSecret: readSecret(source, 'MINI_PROGRAM_TOKEN_SECRET'),
+    adminJwtSecret: readSecret(source, 'JWT_ADMIN_SECRET', nodeEnv),
+    miniProgramTokenSecret: readSecret(source, 'MINI_PROGRAM_TOKEN_SECRET', nodeEnv),
+    corsOrigins: readCorsOrigins(source),
     wechatMiniAppId: readOptional(source, 'WECHAT_MINI_APP_ID'),
     wechatMiniAppSecret: readOptional(source, 'WECHAT_MINI_APP_SECRET'),
     ...readAdminBootstrap(source),
@@ -86,12 +91,61 @@ function readFlag(source: NodeJS.ProcessEnv, key: string): boolean {
   throw new Error(`环境变量 ${key} 只能是 true 或 false`);
 }
 
-function readSecret(source: NodeJS.ProcessEnv, key: string): string {
+/** 仓库里出现过的示例密钥。生产环境出现这些值等同于没有设密码。 */
+const PLACEHOLDER_SECRETS = new Set([
+  'dev-admin-jwt-placeholder',
+  'dev-mini-program-placeholder',
+  'change-me',
+  'changeme',
+]);
+
+function readSecret(source: NodeJS.ProcessEnv, key: string, nodeEnv: string): string {
   const value = readRequired(source, key);
   if (value.length < 8) {
     throw new Error(`环境变量 ${key} 长度至少 8`);
   }
+  if (nodeEnv === 'production') {
+    if (PLACEHOLDER_SECRETS.has(value)) {
+      throw new Error(`生产环境不接受 ${key} 的示例值，请换成随机密钥`);
+    }
+    if (value.length < 32) {
+      throw new Error(`生产环境 ${key} 长度至少 32`);
+    }
+  }
   return value;
+}
+
+/**
+ * 前端跨域白名单，逗号分隔。
+ * 留空表示不开 CORS：只接受同源请求，生产环境应由 nginx 把 /api 反代到本服务。
+ */
+function readCorsOrigins(source: NodeJS.ProcessEnv): string[] {
+  const raw = readOptional(source, 'CORS_ORIGINS');
+  if (!raw) {
+    return [];
+  }
+  const origins = raw
+    .split(',')
+    .map((item) => item.trim().replace(/\/$/, ''))
+    .filter((item) => item.length > 0);
+  for (const origin of origins) {
+    if (origin === '*') {
+      throw new Error('CORS_ORIGINS 不接受通配符，请逐个列出来源');
+    }
+    let url: URL;
+    try {
+      url = new URL(origin);
+    } catch {
+      throw new Error(`CORS_ORIGINS 中的 ${origin} 不是合法的 URL`);
+    }
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+      throw new Error(`CORS_ORIGINS 中的 ${origin} 协议必须是 http 或 https`);
+    }
+    if (url.origin !== origin) {
+      throw new Error(`CORS_ORIGINS 中的 ${origin} 只能是协议加主机加端口，不能带路径`);
+    }
+  }
+  return origins;
 }
 
 function readThresholdDefault(source: NodeJS.ProcessEnv): string {
