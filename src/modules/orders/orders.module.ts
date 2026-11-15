@@ -11,6 +11,7 @@ import { AdminSettlementCompensationsController } from './admin-settlement-compe
 import { OrderPaymentSettler } from './order-payment.settler';
 import { PendingSettlementHook } from './order-paid.hook';
 import { OrdersController } from './orders.controller';
+import { OrderTimeoutService } from './order-timeout.service';
 import { OrdersService } from './orders.service';
 import { PaymentSettlementHook } from './payment-settlement.hook';
 import { RefundsController } from './refunds.controller';
@@ -35,6 +36,7 @@ import { SettlementCompensationService } from './settlement-compensation.service
   ],
   providers: [
     OrdersService,
+    OrderTimeoutService,
     OrderPaymentSettler,
     PaymentSettlementHook,
     { provide: PendingSettlementHook, useExisting: PaymentSettlementHook },
@@ -43,6 +45,7 @@ import { SettlementCompensationService } from './settlement-compensation.service
   ],
   exports: [
     OrdersService,
+    OrderTimeoutService,
     OrderPaymentSettler,
     PendingSettlementHook,
     RefundsService,

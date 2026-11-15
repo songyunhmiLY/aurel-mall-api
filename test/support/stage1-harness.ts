@@ -59,6 +59,7 @@ export function stage1Env(overrides: Partial<AppEnv> = {}): AppEnv {
     allowClockOverride: false,
     allowPreviewAuth: false,
     simulationEnabled: false,
+    orderPaymentTimeoutMinutes: 15,
     adminJwtSecret: 'test-secret-admin',
     miniProgramTokenSecret: 'test-secret-mini',
     corsOrigins: [],

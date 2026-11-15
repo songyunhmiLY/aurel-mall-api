@@ -185,7 +185,7 @@ export function buildIntHarness(databaseUrl: string) {
     undefined,
     cash,
   );
-  const orders = new OrdersService(prisma, clock, wallet, trees, settlement, wechatPay, env.locked);
+  const orders = new OrdersService(prisma, clock, wallet, trees, settlement, wechatPay, env.locked, env);
   const compensations = new SettlementCompensationService(
     prisma,
     clock,

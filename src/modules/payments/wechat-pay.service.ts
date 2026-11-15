@@ -189,6 +189,17 @@ export class WechatPayService {
       throw new BadRequestException('未配置 WECHAT_PAY_NOTIFY_URL，无法向微信支付下单');
     }
     let prepayId = payment.prepayId;
+    // 与超时关单对齐：微信侧的预支付也在这个时刻失效，避免本地关单后用户还能付款。
+    // 剩余不足 1 分钟时直接拦下，否则微信会因 time_expire 过于接近当前时间拒单。
+    const timeoutMinutes = this.env.orderPaymentTimeoutMinutes;
+    let timeExpire: string | undefined;
+    if (timeoutMinutes > 0) {
+      const expiresAt = this.clock.instant(order.placedAt.getTime() + timeoutMinutes * 60_000);
+      if (expiresAt.getTime() - now.getTime() < 60_000) {
+        throw new ConflictException('订单支付已超时，请重新下单');
+      }
+      timeExpire = this.wechatTimeExpire(expiresAt);
+    }
     if (!prepayId) {
       const description = (input.description?.trim() || `订单${order.orderNo}`).slice(0, 127);
       const created = await this.gateway.createJsapiTransaction({
@@ -201,6 +212,7 @@ export class WechatPayService {
         notifyUrl,
         amountFen: payment.amountFen,
         openid,
+        timeExpire,
       });
       prepayId = created.prepayId;
       const updatedAt = await this.clock.now();
@@ -455,6 +467,12 @@ export class WechatPayService {
       expectedMchId,
       requireTransactionId: true,
     });
+  }
+
+  /** 微信要求 RFC3339，形如 2026-11-15T17:30:00+08:00。按上海时区给出，不依赖服务器时区。 */
+  private wechatTimeExpire(date: Date): string {
+    const shanghai = this.clock.instant(date.getTime() + 8 * 60 * 60_000);
+    return `${shanghai.toISOString().slice(0, 19)}+08:00`;
   }
 
   private async ensurePendingPayment(

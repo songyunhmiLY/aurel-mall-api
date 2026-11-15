@@ -2,6 +2,7 @@ import type { ClockService } from '../../src/common/clock/clock.service';
 import type { PrismaService } from '../../src/common/prisma/prisma.service';
 import type { LockedRuntimeConfig } from '../../src/config/locked-runtime';
 import { DueJobRunner } from '../../src/jobs/due-job.runner';
+import { OrderTimeoutService } from '../../src/modules/orders/order-timeout.service';
 import { CofounderAdminService } from '../../src/modules/cofounder/cofounder-admin.service';
 import { CofounderDividendService } from '../../src/modules/cofounder/cofounder-dividend.service';
 import { CofounderEnrollmentService } from '../../src/modules/cofounder/cofounder-enrollment.service';
@@ -116,7 +117,7 @@ export function buildStage4(locked: LockedRuntimeConfig = stage4Locked(), thresh
     undefined,
     cash,
   );
-  const orders = new OrdersService(prisma, clock, wallet, trees, settlement, wechatPay, locked);
+  const orders = new OrdersService(prisma, clock, wallet, trees, settlement, wechatPay, locked, env);
   const cofounderEnrollment = new CofounderEnrollmentService(
     prisma,
     clock,
@@ -161,7 +162,15 @@ export function buildStage4(locked: LockedRuntimeConfig = stage4Locked(), thresh
     paySettings as unknown as WechatPaySettingsService,
     gateway as unknown as WechatPayGateway,
   );
-  const jobs = new DueJobRunner(filing, positions, redPackets, cofounderDividend, compensations);
+  const orderTimeouts = new OrderTimeoutService(prisma, clock, wallet, env);
+  const jobs = new DueJobRunner(
+    filing,
+    positions,
+    redPackets,
+    cofounderDividend,
+    compensations,
+    orderTimeouts,
+  );
   const network = new NetworkAdminService(prisma, performance);
   const filingQuery = new FilingQueryService(prisma);
   const awardAdmin = new AwardAdminService(prisma);
@@ -187,6 +196,7 @@ export function buildStage4(locked: LockedRuntimeConfig = stage4Locked(), thresh
     awardAdmin,
     walletAdmin,
     compensations,
+    orderTimeouts,
     performance,
     wechatPay,
     paySettings,

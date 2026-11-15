@@ -40,6 +40,8 @@ export interface JsapiPrepayInput {
   notifyUrl: string;
   amountFen: number;
   openid: string;
+  /** RFC3339 时间。与本地超时关单对齐，微信侧到点后不再接受这笔预支付。 */
+  timeExpire?: string;
 }
 
 export interface WechatNotifyHeaders {
@@ -77,6 +79,7 @@ export class WechatPayGateway {
       out_trade_no: input.outTradeNo,
       notify_url: input.notifyUrl,
       amount: { total: input.amountFen, currency: 'CNY' },
+      ...(input.timeExpire ? { time_expire: input.timeExpire } : {}),
       payer: { openid: input.openid },
     });
     const response = await this.signedFetch('POST', JSAPI_PATH, body, input);

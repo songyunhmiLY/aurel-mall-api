@@ -24,6 +24,7 @@ interface OrderRow {
   status: string;
   payAmountFen: number;
   paidAt: Date | null;
+  placedAt?: Date;
   updatedAt: Date;
 }
 
@@ -202,6 +203,8 @@ describe('wechat pay orders', () => {
     };
     const env = {
       wechatPayNotifyUrl: 'https://mall.example.com/api/v1/payments/wechat/notify' as string | null,
+      // 默认不启用超时对齐；需要它的用例单独打开
+      orderPaymentTimeoutMinutes: 0 as number,
     };
     const service = new WechatPayService(
       db as unknown as PrismaService,
@@ -285,6 +288,30 @@ describe('wechat pay orders', () => {
     });
     expect(reused.payNo).toBe(created.payNo);
     expect(gateway.createJsapiTransaction).toHaveBeenCalledTimes(1);
+  });
+
+  it('aligns the wechat prepay expiry with the unpaid timeout window', async () => {
+    const { db, service, settings, gateway, env } = setup();
+    env.orderPaymentTimeoutMinutes = 15;
+    // 3 分钟前下单：微信侧的失效时刻应为 placedAt + 15 分钟
+    seedOrder(db, { placedAt: new Date(now.getTime() - 3 * 60_000) });
+    settings.credentials = credentials();
+    await service.createPrepay({ orderId: '7', appId: 'wx-app', openid: 'openid-1' });
+    expect(gateway.createJsapiTransaction).toHaveBeenCalledWith(
+      expect.objectContaining({ timeExpire: '2026-11-13T11:16:05+08:00' }),
+    );
+  });
+
+  it('refuses to start a payment that is about to time out', async () => {
+    const { db, service, settings, gateway, env } = setup();
+    env.orderPaymentTimeoutMinutes = 15;
+    // 只剩 30 秒：付了也会被关单，直接拦下让用户重新下单
+    seedOrder(db, { placedAt: new Date(now.getTime() - 14.5 * 60_000) });
+    settings.credentials = credentials();
+    await expect(
+      service.createPrepay({ orderId: '7', appId: 'wx-app', openid: 'openid-1' }),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(gateway.createJsapiTransaction).not.toHaveBeenCalled();
   });
 
   it('does not call wechat when the notify url is missing, and retries a failed prepay on the same payment', async () => {

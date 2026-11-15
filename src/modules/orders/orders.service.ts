@@ -13,8 +13,9 @@ import type { Order, OrderItem, Prisma, Product, ProductSku, SkuStock } from '@p
 import { USER_STATUS_ACTIVE } from '../../common/auth/user-status';
 import { ClockService } from '../../common/clock/clock.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import type { AppEnv } from '../../config/app-env';
 import type { LockedRuntimeConfig } from '../../config/locked-runtime';
-import { LOCKED_RUNTIME_CONFIG } from '../../config/tokens';
+import { APP_ENV, LOCKED_RUNTIME_CONFIG } from '../../config/tokens';
 import {
   PRODUCT_STATUS_ON,
   PRODUCT_ZONE_MALL,
@@ -104,6 +105,8 @@ export interface OrderView {
   trackingNumber: string | null;
   items: OrderItemView[];
   placedAt: string;
+  /** 待支付订单的自动关闭时刻。null 表示不限时（ORDER_PAYMENT_TIMEOUT_MINUTES=0）或订单已不在待支付。 */
+  payDeadline: string | null;
   paidAt: string | null;
   shippedAt: string | null;
   closedAt: string | null;
@@ -151,6 +154,7 @@ export class OrdersService {
     @Inject(forwardRef(() => WechatPayService))
     private readonly wechat: WechatPayService,
     @Inject(LOCKED_RUNTIME_CONFIG) private readonly locked: LockedRuntimeConfig,
+    @Inject(APP_ENV) private readonly env: AppEnv,
   ) {}
 
   async create(userId: bigint, input: CreateOrderInput): Promise<OrderView> {
@@ -523,10 +527,23 @@ export class OrdersService {
       trackingNumber: order.trackingNo,
       items: rows.map(toItemView),
       placedAt: order.placedAt.toISOString(),
+      payDeadline: this.payDeadlineOf(order),
       paidAt: order.paidAt ? order.paidAt.toISOString() : null,
       shippedAt: order.shippedAt ? order.shippedAt.toISOString() : null,
       closedAt: order.closedAt ? order.closedAt.toISOString() : null,
     };
+  }
+
+  /** 前端倒计时用。与定时关单共用同一份设置，避免两处时长不一致。 */
+  private payDeadlineOf(order: Order): string | null {
+    if (order.status !== ORDER_PENDING_PAYMENT) {
+      return null;
+    }
+    const minutes = this.env.orderPaymentTimeoutMinutes;
+    if (minutes <= 0) {
+      return null;
+    }
+    return this.clock.instant(order.placedAt.getTime() + minutes * 60_000).toISOString();
   }
 
   private unitPrice(): number {

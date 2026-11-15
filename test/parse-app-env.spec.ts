@@ -89,6 +89,23 @@ describe('locked runtime config', () => {
     ).toThrow(/SIMULATION_ENABLED/);
   });
 
+  it('reads the unpaid order timeout with a 15 minute default', () => {
+    expect(parseAppEnv(example).orderPaymentTimeoutMinutes).toBe(15);
+    expect(
+      parseAppEnv({ ...example, ORDER_PAYMENT_TIMEOUT_MINUTES: '30' }).orderPaymentTimeoutMinutes,
+    ).toBe(30);
+    // 0 表示不自动关单，是合法配置
+    expect(
+      parseAppEnv({ ...example, ORDER_PAYMENT_TIMEOUT_MINUTES: '0' }).orderPaymentTimeoutMinutes,
+    ).toBe(0);
+    expect(() =>
+      parseAppEnv({ ...example, ORDER_PAYMENT_TIMEOUT_MINUTES: '15m' }),
+    ).toThrow(/ORDER_PAYMENT_TIMEOUT_MINUTES/);
+    expect(() =>
+      parseAppEnv({ ...example, ORDER_PAYMENT_TIMEOUT_MINUTES: '1441' }),
+    ).toThrow(/ORDER_PAYMENT_TIMEOUT_MINUTES/);
+  });
+
   it('rejects a wallet split that does not add up to 10000', () => {
     expect(() => parseAppEnv({ ...example, STARTUP_AWARD_WITHDRAWABLE_BPS: '2000' })).toThrow(
       /STARTUP_AWARD/,

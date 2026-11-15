@@ -1,9 +1,4 @@
-import {
-  BadRequestException,
-  ConflictException,
-  ForbiddenException,
-  ValidationPipe,
-} from '@nestjs/common';
+import { BadRequestException, ForbiddenException, ValidationPipe } from '@nestjs/common';
 import { validate } from 'class-validator';
 import { generateKeyPairSync } from 'node:crypto';
 import { PRODUCT_ZONE_MALL, PRODUCT_ZONE_STARTUP } from '../src/modules/catalog/catalog.constants';

@@ -61,6 +61,7 @@ services:
       # 仿真台默认不传（false）。生产 compose 不提供该变量；测试部署如需仿真，
       # 单独覆盖 SIMULATION_ENABLED=true 并配合 ALLOW_CLOCK_OVERRIDE=true。
       SIMULATION_ENABLED: ${SIMULATION_ENABLED:-false}
+      ORDER_PAYMENT_TIMEOUT_MINUTES: ${ORDER_PAYMENT_TIMEOUT_MINUTES:-15}
       JWT_ADMIN_SECRET: ${JWT_ADMIN_SECRET:?生产环境必须显式设置 JWT_ADMIN_SECRET，且长度不少于 32}
       MINI_PROGRAM_TOKEN_SECRET: ${MINI_PROGRAM_TOKEN_SECRET:?生产环境必须显式设置 MINI_PROGRAM_TOKEN_SECRET}
       # 前端跨域白名单，逗号分隔。留空则只接受同源请求（推荐用 nginx 反代 /api）。

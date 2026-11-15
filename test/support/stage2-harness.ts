@@ -70,7 +70,7 @@ export function buildStage2(unitPriceFen = 1000) {
     undefined,
     cash,
   );
-  const orders = new OrdersService(prisma, clock, wallet, trees, settlement, wechatPay, env.locked);
+  const orders = new OrdersService(prisma, clock, wallet, trees, settlement, wechatPay, env.locked, env);
   const compensations = new SettlementCompensationService(
     prisma,
     clock,

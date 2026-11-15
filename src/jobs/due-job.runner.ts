@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { CofounderDividendService } from '../modules/cofounder/cofounder-dividend.service';
+import { OrderTimeoutService } from '../modules/orders/order-timeout.service';
 import { SettlementCompensationService } from '../modules/orders/settlement-compensation.service';
 import { FilingService } from '../modules/rewards/filing/filing.service';
 import { PositionsService } from '../modules/rewards/positions/positions.service';
@@ -19,6 +20,7 @@ export class DueJobRunner {
     private readonly redPackets: RedPacketService,
     private readonly cofounders: CofounderDividendService,
     private readonly compensations: SettlementCompensationService,
+    private readonly orderTimeouts: OrderTimeoutService,
   ) {}
 
   async runDue(): Promise<void> {
@@ -27,5 +29,7 @@ export class DueJobRunner {
     await this.redPackets.runDue();
     await this.cofounders.runDue();
     await this.compensations.runDue();
+    // 超时关单放最后：先让补偿有机会结算，结算成功的订单就不再是待支付了。
+    await this.orderTimeouts.closeExpired();
   }
 }

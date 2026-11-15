@@ -10,6 +10,8 @@ export interface AppEnv {
   allowPreviewAuth: boolean;
   /** 时间仿真台开关。默认关闭；生产环境显式为 true 会被拒绝启动。 */
   simulationEnabled: boolean;
+  /** 待支付订单的自动关闭时长（分钟）。0 表示不自动关闭，回退为纯手动关单。 */
+  orderPaymentTimeoutMinutes: number;
   adminJwtSecret: string;
   miniProgramTokenSecret: string;
   /** 允许跨域访问的前端源。为空表示只接受同源请求（生产建议用 nginx 反代）。 */
@@ -39,6 +41,7 @@ export function parseAppEnv(source: NodeJS.ProcessEnv): AppEnv {
     allowClockOverride: readFlag(source, 'ALLOW_CLOCK_OVERRIDE'),
     allowPreviewAuth: readFlag(source, 'ALLOW_PREVIEW_AUTH'),
     simulationEnabled: readSimulationEnabled(source, nodeEnv),
+    orderPaymentTimeoutMinutes: readOrderPaymentTimeout(source),
     adminJwtSecret: readSecret(source, 'JWT_ADMIN_SECRET', nodeEnv),
     miniProgramTokenSecret: readSecret(source, 'MINI_PROGRAM_TOKEN_SECRET', nodeEnv),
     corsOrigins: readCorsOrigins(source),
@@ -105,6 +108,25 @@ function readSimulationEnabled(source: NodeJS.ProcessEnv, nodeEnv: string): bool
     throw new Error('生产环境不允许开启 SIMULATION_ENABLED（时间仿真台只在测试环境使用）');
   }
   return enabled;
+}
+
+/** 待支付订单自动关闭时长。默认 15 分钟；0 关闭该功能（只保留手动关单）。 */
+const DEFAULT_ORDER_PAYMENT_TIMEOUT_MINUTES = 15;
+const MAX_ORDER_PAYMENT_TIMEOUT_MINUTES = 1440;
+
+function readOrderPaymentTimeout(source: NodeJS.ProcessEnv): number {
+  const raw = source.ORDER_PAYMENT_TIMEOUT_MINUTES;
+  if (raw === undefined || raw.trim() === '') {
+    return DEFAULT_ORDER_PAYMENT_TIMEOUT_MINUTES;
+  }
+  if (!/^\d+$/.test(raw.trim())) {
+    throw new Error('ORDER_PAYMENT_TIMEOUT_MINUTES 必须是非负整数（分钟）');
+  }
+  const minutes = Number(raw.trim());
+  if (minutes > MAX_ORDER_PAYMENT_TIMEOUT_MINUTES) {
+    throw new Error('ORDER_PAYMENT_TIMEOUT_MINUTES 不能超过 1440（24 小时）');
+  }
+  return minutes;
 }
 
 /** 仓库里出现过的示例密钥。生产环境出现这些值等同于没有设密码。 */
