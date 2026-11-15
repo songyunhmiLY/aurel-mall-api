@@ -384,7 +384,7 @@ export class FinanceService {
 
   private async startOfNextDay(raw: string): Promise<Date> {
     const day = await this.clock.startOfDay(this.parseDay(raw));
-    return new Date(day.getTime() + 24 * 60 * 60 * 1000);
+    return this.clock.instant(day.getTime() + 24 * 60 * 60 * 1000);
   }
 
   private parseDay(raw: string): Date {
@@ -392,11 +392,11 @@ export class FinanceService {
     if (!/^\d{4}-\d{2}-\d{2}/.test(trimmed)) {
       throw new BadRequestException('日期格式必须是 YYYY-MM-DD');
     }
-    const parsed = new Date(trimmed);
-    if (Number.isNaN(parsed.getTime())) {
+    const ms = Date.parse(trimmed);
+    if (Number.isNaN(ms)) {
       throw new BadRequestException('日期不正确');
     }
-    return parsed;
+    return this.clock.instant(ms);
   }
 }
 

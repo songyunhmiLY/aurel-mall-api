@@ -33,6 +33,10 @@ class FakeClock {
   async now(): Promise<Date> {
     return this.override ?? new Date('2026-11-14T04:00:00.000Z');
   }
+
+  instant(unixMs: number): Date {
+    return new Date(unixMs);
+  }
 }
 
 class MemoryStore implements SimulationStore {

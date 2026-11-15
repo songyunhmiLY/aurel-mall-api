@@ -94,8 +94,8 @@ export class SimulationService {
     if (view.source !== 'override') {
       throw new BadRequestException('请先设置仿真时钟起点，再单步推进');
     }
-    const target = this.resolveTarget(view.override as string, input);
-    if (target.getTime() <= new Date(view.now).getTime()) {
+    const target = await this.resolveTarget(view.override as string, input);
+    if (target.getTime() <= Date.parse(view.now)) {
       throw new BadRequestException('目标时刻必须晚于当前仿真时刻');
     }
     await this.clock.setOverride(target.toISOString());
@@ -132,23 +132,26 @@ export class SimulationService {
     }
   }
 
-  private resolveTarget(currentOverride: string, input: { to?: string; byMinutes?: number }): Date {
-    const current = new Date(currentOverride);
+  private async resolveTarget(
+    currentOverride: string,
+    input: { to?: string; byMinutes?: number },
+  ): Promise<Date> {
+    const current = this.clock.instant(Date.parse(currentOverride));
     if (input.to !== undefined) {
-      const parsed = new Date(input.to);
-      if (Number.isNaN(parsed.getTime())) {
+      const ms = Date.parse(input.to);
+      if (Number.isNaN(ms)) {
         throw new BadRequestException('无效的 ISO 时间');
       }
-      return parsed;
+      return this.clock.instant(ms);
     }
     const byMinutes = input.byMinutes;
     if (byMinutes !== undefined) {
       if (!Number.isInteger(byMinutes) || byMinutes <= 0 || byMinutes > 60 * 24 * 366) {
         throw new BadRequestException('byMinutes 必须是 1 到 527040 的整数');
       }
-      return new Date(current.getTime() + byMinutes * 60_000);
+      return this.clock.instant(current.getTime() + byMinutes * 60_000);
     }
-    return new Date();
+    return this.clock.now();
   }
 
   /** 账务快照：钱包账户余额、现金账净额、关键计数。 */
