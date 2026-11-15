@@ -18,17 +18,12 @@ import {
 } from '../wallet/wallet.constants';
 import { WalletService } from '../wallet/wallet.service';
 import { WechatPayGateway, WechatRefundAlreadyAccepted } from '../payments/wechat-pay.gateway';
-import {
-  WechatPaySettingsService,
-  type WechatPayCredentials,
-} from '../payments/wechat-pay-settings.service';
+import { WechatPaySettingsService } from '../payments/wechat-pay-settings.service';
 import {
   OrderPaymentSettler,
   classifySettlementError,
 } from './order-payment.settler';
 import {
-  COMPENSATION_ACTIVE_STATUSES,
-  COMPENSATION_AWAITING_OPERATION,
   COMPENSATION_AUTO_RETRY,
   COMPENSATION_COMPLETED,
   COMPENSATION_MAX_RETRY,
@@ -150,13 +145,13 @@ export class SettlementCompensationService {
   /** 定时任务入口。只处理 auto_retry 状态、未到重试间隔、未超次数上限的记录。 */
   async runDue(limit = 20): Promise<number> {
     const now = await this.clock.now();
-    const threshold = new Date(now.getTime() - COMPENSATION_RETRY_INTERVAL_MS);
+    const cutoff = now.getTime() - COMPENSATION_RETRY_INTERVAL_MS;
     const candidates = await this.prisma.settlementCompensation.findMany({
       where: { status: COMPENSATION_AUTO_RETRY, retryCount: { lt: COMPENSATION_MAX_RETRY } },
       orderBy: { lastTriedAt: 'asc' },
     });
     const due = candidates
-      .filter((row) => !row.lastTriedAt || row.lastTriedAt < threshold)
+      .filter((row) => !row.lastTriedAt || row.lastTriedAt.getTime() < cutoff)
       .slice(0, limit);
     let attempted = 0;
     for (const row of due) {
@@ -203,6 +198,10 @@ export class SettlementCompensationService {
   /**
    * 转退款。微信实收原路退回（幂等退款单号），钱包冻结份额解冻回账户。
    * 订单已结算完成则拒绝；这属于运营兜底操作，不是用户退款申请。
+   *
+   * @deprecated 退款能力已整体下线：管理端路由返回 410，商城不再支持退货退款，
+   * 补偿只能通过「继续结算」推进。方法保留仅为历史数据解释与将来可能的恢复，
+   * 重新启用前必须先补上状态预占（CAS 到中间态）再调微信，否则与重试并发会造成重复退款。
    */
   async refund(compensationId: bigint, adminId: bigint): Promise<CompensationView> {
     const now = await this.clock.now();

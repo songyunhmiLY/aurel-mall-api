@@ -1,11 +1,12 @@
-import { Body, Controller, Get, HttpCode, Param, Post, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, GoneException, Post, Query, UseGuards } from '@nestjs/common';
 import { AdminJwtGuard } from '../../common/auth/admin-jwt.guard';
-import type { AdminPrincipal } from '../../common/auth/admin-principal';
-import { CurrentAdmin } from '../../common/auth/current-admin.decorator';
 import { parsePage, parsePageSize, parseRouteId } from '../../common/http/parse-id';
-import { ReviewRefundDto } from './dto/review-refund.dto';
 import { RefundsService } from './refunds.service';
 
+/**
+ * 管理端退款接口。审核动作已下线（410 Gone），只保留只读列表用于历史追溯。
+ * 页面不在菜单里，需要用直链访问；列表保留是为了财务能查历史退款记录。
+ */
 @Controller('admin/refunds')
 @UseGuards(AdminJwtGuard)
 export class AdminRefundsController {
@@ -28,18 +29,16 @@ export class AdminRefundsController {
   }
 
   @Post(':id/approve')
-  @HttpCode(200)
-  approve(
-    @CurrentAdmin() admin: AdminPrincipal,
-    @Param('id') id: string,
-    @Body() body: ReviewRefundDto,
-  ) {
-    return this.refunds.approve(parseRouteId(id), admin.id, body);
+  approve(): never {
+    throw refundReviewOffline();
   }
 
   @Post(':id/reject')
-  @HttpCode(200)
-  reject(@CurrentAdmin() admin: AdminPrincipal, @Param('id') id: string) {
-    return this.refunds.reject(parseRouteId(id), admin.id);
+  reject(): never {
+    throw refundReviewOffline();
   }
+}
+
+function refundReviewOffline(): GoneException {
+  return new GoneException('退款审核已下线，历史记录仅可查看');
 }
