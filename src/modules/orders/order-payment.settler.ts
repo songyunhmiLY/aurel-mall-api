@@ -18,21 +18,12 @@ import {
   COMPENSATION_AUTO_RETRY,
   COMPENSATION_AWAITING_OPERATION,
   COMPENSATION_REASON_SEAT,
-  COMPENSATION_REASON_STOCK,
   COMPENSATION_REASON_TRANSIENT,
   COMPENSATION_REASON_WALLET,
 } from './settlement-compensation.constants';
 import { PendingSettlementHook } from './order-paid.hook';
 
 type Tx = Prisma.TransactionClient;
-
-/** 结算时库存不够。补偿机制按这个类型把单子转入待人工（先补货再继续结算）。 */
-export class StockInsufficientError extends Error {
-  constructor() {
-    super('库存不足');
-    this.name = 'StockInsufficientError';
-  }
-}
 
 /** 钱包份额收不回来（冻结已释放且余额不够）。补偿机制按这个类型转入待人工。 */
 export class WalletShortfallError extends Error {
@@ -57,9 +48,6 @@ export type PaidBy = 'wechat' | 'wallet';
 
 /** 结算失败 → 补偿记录的 (状态, 失败原因) 分类。登记时和重试时共用同一份。 */
 export function classifySettlementError(error: unknown): { status: string; reason: string } {
-  if (error instanceof StockInsufficientError) {
-    return { status: COMPENSATION_AWAITING_OPERATION, reason: COMPENSATION_REASON_STOCK };
-  }
   if (error instanceof WalletShortfallError) {
     return { status: COMPENSATION_AWAITING_OPERATION, reason: COMPENSATION_REASON_WALLET };
   }
@@ -71,7 +59,7 @@ export function classifySettlementError(error: unknown): { status: string; reaso
 
 /**
  * 微信支付进入终态，或账户已足够支付时，完成或回滚订单。
- * 扣款、扣库存、入座和订单状态在同一个事务里。
+ * 扣款、入座和订单状态在同一个事务里。库存不参与结算。
  */
 @Injectable()
 export class OrderPaymentSettler {
@@ -154,7 +142,6 @@ export class OrderPaymentSettler {
       }
       throw error;
     }
-    await this.deductStock(tx, order.id, now);
     if (order.zone === PRODUCT_ZONE_STARTUP) {
       try {
         await this.trees.seat(tx, order.userId, now);
@@ -219,23 +206,4 @@ export class OrderPaymentSettler {
     }
   }
 
-  private async deductStock(tx: Tx, orderId: bigint, now: Date): Promise<void> {
-    const items = await tx.orderItem.findMany({ where: { orderId } });
-    const ordered = [...items].sort((left, right) =>
-      left.skuId < right.skuId ? -1 : left.skuId > right.skuId ? 1 : 0,
-    );
-    for (const item of ordered) {
-      await tx.$queryRaw`
-        SELECT id FROM sku_stocks WHERE sku_id = ${item.skuId} FOR UPDATE
-      `;
-      const stock = await tx.skuStock.findUnique({ where: { skuId: item.skuId } });
-      if (!stock || stock.quantity < item.quantity) {
-        throw new StockInsufficientError();
-      }
-      await tx.skuStock.update({
-        where: { skuId: item.skuId },
-        data: { quantity: stock.quantity - item.quantity, updatedAt: now },
-      });
-    }
-  }
 }

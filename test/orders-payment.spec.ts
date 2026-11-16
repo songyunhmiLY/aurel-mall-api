@@ -13,7 +13,6 @@ import {
   loginBuyer,
   marketNode,
   parentChain,
-  stockOf,
   type Stage2,
 } from './support/stage2-harness';
 
@@ -116,7 +115,6 @@ describe('orders and forced payment', () => {
     });
     expect(stage.hook.events).toHaveLength(1);
     expect(stage.hook.events[0]?.pvFen).toBe(0);
-    expect(stockOf(stage.db, first.skuId)).toBe(4);
 
     const again = await stage.orders.create(buyer, {
       zone: PRODUCT_ZONE_STARTUP,
@@ -166,7 +164,6 @@ describe('orders and forced payment', () => {
     });
     expect(marketNode(stage.db, buyer)).toBeNull();
     expect(stage.hook.events).toHaveLength(0);
-    expect(stockOf(stage.db, product.skuId)).toBe(4);
 
     const restarted = await stage.orders.pay(buyer, failed.id);
     await stage.orders.cancel(buyer, failed.id);
@@ -223,7 +220,6 @@ describe('orders and forced payment', () => {
     expect(paid.status).toBe('paid');
     expect((await stage.wallet.getBalances(buyer)).points.balanceFen).toBe(500n);
     expect(debits(stage.db, buyer, 'points')).toHaveLength(1);
-    expect(stockOf(stage.db, product.skuId)).toBe(1);
     expect(stage.db.marketTreeNode.rows.filter((row) => row.userId === buyer)).toHaveLength(1);
     expect(stage.hook.events).toHaveLength(1);
     // 重复回调只能记一笔微信实收（需求 §16.1）。
@@ -286,7 +282,6 @@ describe('orders and forced payment', () => {
       member: false,
       seated: false,
     });
-    expect(stockOf(stage.db, product.skuId)).toBe(3);
 
     const stranger = await loginBuyer(stage, 'stranger', null);
     const strangerAddress = await addressOf(stage, stranger);
@@ -359,8 +354,6 @@ describe('orders and forced payment', () => {
     expect(debits(stage.db, buyer, 'points').map((row) => row.bizId)).not.toContain(
       mall.id.toString(),
     );
-    expect(stockOf(stage.db, gift.skuId)).toBe(4);
-    expect(stockOf(stage.db, cup.skuId)).toBe(3);
     expect(stage.hook.events.at(-1)?.pvFen).toBe(350);
     expect(stage.db.marketTreeNode.rows.filter((row) => row.userId === buyer)).toHaveLength(1);
     const shipped = await stage.orders.ship(mall.id, {
@@ -427,7 +420,6 @@ describe('orders and forced payment', () => {
     });
     expect((await stage.wallet.getBalances(buyer)).withdrawable.balanceFen).toBe(20n);
     expect((await stage.orders.getForUser(buyer, partial.id)).status).toBe('pending_payment');
-    expect(stockOf(stage.db, goods.skuId)).toBe(1);
 
     const retry = await stage.orders.pay(buyer, partial.id);
     expect(retry.order.consumptionFen).toBe(10);
@@ -438,38 +430,33 @@ describe('orders and forced payment', () => {
     expect((await stage.orders.getForUser(buyer, partial.id)).pvFen).toBe(20);
     expect((await stage.wallet.getBalances(buyer)).consumption.balanceFen).toBe(0n);
     expect((await stage.wallet.getBalances(buyer)).withdrawable.balanceFen).toBe(0n);
-    expect(stockOf(stage.db, goods.skuId)).toBe(0);
   });
 
-  it('rejects an order or a payment when stock is short', async () => {
+  it('never looks at stock when ordering or paying', async () => {
     const stage = buildStage2();
     const rootId = await boot(stage);
-    const buyer = await loginBuyer(stage, 'stock', rootId);
+    const buyer = await loginBuyer(stage, 'no-stock', rootId);
     const addressId = await addressOf(stage, buyer);
     const product = await startupProduct(stage, '创业装', 1);
-    await expect(
-      stage.orders.create(buyer, {
-        zone: PRODUCT_ZONE_STARTUP,
-        addressId,
-        items: [{ productId: product.id, quantity: 2 }],
-      }),
-    ).rejects.toThrow('库存不足');
-    expect(stage.db.order.rows).toHaveLength(0);
 
+    // 库存只留档：数量小于购买量也照常下单，不进任何校验
     const created = await stage.orders.create(buyer, {
       zone: PRODUCT_ZONE_STARTUP,
       addressId,
-      items: [{ productId: product.id, quantity: 1 }],
+      items: [{ productId: product.id, quantity: 2 }],
     });
+    expect(stage.db.order.rows).toHaveLength(1);
+
+    // 支付期间库存被改成 0，也不影响冻结与结算
     await stage.catalog.setStock(product.id, 0);
     await credit(stage, buyer, 'points', 5000);
-    await expect(stage.orders.pay(buyer, created.id)).rejects.toThrow('库存不足');
-    expect((await stage.orders.getForUser(buyer, created.id)).status).toBe('pending_payment');
-    expect((await stage.wallet.getBalances(buyer)).points.balanceFen).toBe(5000n);
-    expect(marketNode(stage.db, buyer)).toBeNull();
-    await expect(
-      stage.orders.ship(created.id, { courierName: '顺丰', trackingNumber: 'SF1' }),
-    ).rejects.toThrow('只有已支付的订单可以发货');
+    // 积分足够时直接扣款完成，不经过微信，也不算库存
+    const started = await stage.orders.pay(buyer, created.id);
+    expect(started.wechat).toBeNull();
+    expect((await stage.orders.getForUser(buyer, created.id)).status).toBe('paid');
+    expect(marketNode(stage.db, buyer)).not.toBeNull();
+    // 结算不扣库存，留档数量保持原样
+    expect(stage.db.skuStock.rows.find((row) => row.skuId === product.skuId)?.quantity).toBe(0);
   });
 
   it('rejects a missing address and an address that belongs to someone else', async () => {

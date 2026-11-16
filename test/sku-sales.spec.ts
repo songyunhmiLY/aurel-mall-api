@@ -5,7 +5,6 @@ import {
   boot,
   buildStage2,
   loginBuyer,
-  stockOf,
   type Stage2,
 } from './support/stage2-harness';
 
@@ -115,7 +114,8 @@ describe('product cost and sku sales summary', () => {
       profitFen: '1000',
     });
 
-    expect(stockOf(stage.db, withCost.skuId)).toBe(3);
+    // 库存不参与结算，留档数量不变
+    expect(stage.db.skuStock.rows.find((row) => row.skuId === withCost.skuId)?.quantity).toBe(5);
   });
 
   it('keeps cost optional and defaults profit to full sales when cost is unset', async () => {

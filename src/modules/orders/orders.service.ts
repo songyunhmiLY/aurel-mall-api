@@ -9,7 +9,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { randomBytes } from 'node:crypto';
-import type { Order, OrderItem, Prisma, Product, ProductSku, SkuStock } from '@prisma/client';
+import type { Order, OrderItem, Prisma, Product, ProductSku } from '@prisma/client';
 import { USER_STATUS_ACTIVE } from '../../common/auth/user-status';
 import { ClockService } from '../../common/clock/clock.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
@@ -141,7 +141,7 @@ interface QuotedLine {
 /**
  * 创业专区和会员商城下单。
  * 支付顺序固定，调用方不能改来源。账户够付时不发起微信支付。
- * 需要微信支付时先冻结账户份额，成功后再扣款、扣库存；创业专区同时入座。
+ * 需要微信支付时先冻结账户份额，成功后再扣款；创业专区同时入座。库存不参与下单与结算。
  */
 @Injectable()
 export class OrdersService {
@@ -354,7 +354,6 @@ export class OrdersService {
 
   private async prepareSplit(tx: Tx, order: Order, now: Date): Promise<void> {
     await this.wallet.lockAll(tx, order.userId, now);
-    await this.assertStock(tx, order.id);
     if (order.zone === PRODUCT_ZONE_STARTUP) {
       const user = await tx.user.findUnique({ where: { id: order.userId } });
       if (!user?.seated) {
@@ -388,17 +387,6 @@ export class OrdersService {
         updatedAt: now,
       },
     });
-  }
-
-  private async assertStock(tx: Tx, orderId: bigint): Promise<void> {
-    const items = await tx.orderItem.findMany({ where: { orderId } });
-    for (const item of sortBySku(items)) {
-      await tx.$queryRaw`SELECT id FROM sku_stocks WHERE sku_id = ${item.skuId} FOR UPDATE`;
-      const stock = await tx.skuStock.findUnique({ where: { skuId: item.skuId } });
-      if (!stock || stock.quantity < item.quantity) {
-        throw new ConflictException('库存不足');
-      }
-    }
   }
 
   private async closePending(userId: bigint, orderId: bigint): Promise<void> {
@@ -454,11 +442,7 @@ export class OrdersService {
       if (!sku || sku.status !== PRODUCT_STATUS_ON) {
         throw new BadRequestException('商品未上架');
       }
-      const stock = await tx.skuStock.findUnique({ where: { skuId: sku.id } });
-      if (!stock || stock.quantity < item.quantity) {
-        throw new ConflictException('库存不足');
-      }
-      lines.push(quoteLine(zone, product, sku, stock, item.quantity, this.unitPrice()));
+      lines.push(quoteLine(zone, product, sku, item.quantity, this.unitPrice()));
     }
     return lines;
   }
@@ -559,7 +543,6 @@ function quoteLine(
   zone: string,
   product: Product,
   sku: ProductSku,
-  _stock: SkuStock,
   quantity: number,
   unitPrice: number,
 ): QuotedLine {
@@ -673,12 +656,6 @@ function checkedMul(unit: number, quantity: number): number {
   } catch {
     throw new BadRequestException('订单金额超出范围');
   }
-}
-
-function sortBySku(items: OrderItem[]): OrderItem[] {
-  return [...items].sort((left, right) =>
-    left.skuId < right.skuId ? -1 : left.skuId > right.skuId ? 1 : 0,
-  );
 }
 
 async function lockOrder(tx: Tx, orderId: bigint): Promise<void> {

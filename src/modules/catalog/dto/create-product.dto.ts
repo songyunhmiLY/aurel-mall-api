@@ -75,10 +75,12 @@ export class CreateProductDto {
   @Matches(/^\d+$/, { message: '分类编号不正确' })
   categoryId?: string | null;
 
+  /** 库存不参与下单与结算，仅作留档。不传按 0 记。 */
+  @IsOptional()
   @IsInt()
   @Min(0)
   @Max(MAX_INT)
-  stockQuantity!: number;
+  stockQuantity?: number;
 
   @IsOptional()
   @IsIn(['draft', 'on', 'off'], { message: '商品状态不正确' })

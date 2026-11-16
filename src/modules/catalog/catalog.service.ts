@@ -96,7 +96,8 @@ export interface CreateProductInput {
   pvFen?: number | null;
   costFen?: number | null;
   categoryId?: bigint | null;
-  stockQuantity: number;
+  /** 库存不参与下单与结算，只留档；不传按 0 记。 */
+  stockQuantity?: number;
   status?: string;
 }
 
@@ -455,7 +456,7 @@ export class CatalogService {
       coverUrl?: string | null;
       imageUrls?: string[];
       freightFen: number;
-      stockQuantity: number;
+      stockQuantity?: number;
     },
     requireName: boolean,
   ): {
@@ -481,7 +482,8 @@ export class CatalogService {
           ? []
           : input.imageUrls.map((url, index) => parseUrl(url, `附图${index + 1}`)),
       freightFen: assertNonNegativeInt(input.freightFen, '运费'),
-      stockQuantity: assertNonNegativeInt(input.stockQuantity, '库存'),
+      // 库存不参与下单与结算，只留档；不传按 0 记。
+      stockQuantity: assertNonNegativeInt(input.stockQuantity ?? 0, '库存'),
     };
   }
 

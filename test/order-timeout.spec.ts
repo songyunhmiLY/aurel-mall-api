@@ -108,13 +108,13 @@ describe('order timeout close', () => {
 
   it('never closes an order that has a compensation record', async () => {
     const stage = buildStage2();
-    const { orderId } = await pendingOrder(stage, 'timeout-compensation');
+    const { buyer, orderId } = await pendingOrder(stage, 'timeout-compensation');
 
-    // 微信已扣款但库存不足，结算事务回滚：订单仍是待支付，holds 仍冻结，补偿等待人工处理
-    const orderItems = stage.db.orderItem.rows.filter((row) => row.orderId === orderId);
-    stage.db.skuStock.update({
-      where: { skuId: orderItems[0]!.skuId },
-      data: { quantity: 0 },
+    // 微信已扣款但结算失败（这里让消费金余额被别处扣走）：订单仍是待支付，
+    // holds 仍冻结，补偿等待人工处理
+    stage.db.walletAccount.update({
+      where: { userId: buyer, walletType: 'consumption' },
+      data: { balanceFen: 0n },
     });
     const payment = paymentOf(stage, orderId)!;
     await stage.wechatPay.simulateSuccess(String(payment.payNo));

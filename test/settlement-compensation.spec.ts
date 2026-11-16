@@ -11,7 +11,6 @@ import {
   credit,
   loginBuyer,
   marketNode,
-  stockOf,
   type Stage2,
 } from './support/stage2-harness';
 
@@ -43,25 +42,28 @@ describe('settlement compensation', () => {
     return stage.db.cashLedgerEntry.rows;
   }
 
-  it('registers a compensation when stock runs out, then finishes after restocking', async () => {
+  it('registers a compensation when settlement fails, then finishes after the balance is restored', async () => {
     const stage = buildStage2();
     const rootId = await boot(stage);
-    const buyer = await loginBuyer(stage, 'comp-stock', rootId);
+    const buyer = await loginBuyer(stage, 'comp-shortfall', rootId);
     const addressId = await addressOf(stage, buyer);
-    const product = await startupProduct(stage, '创业补偿甲', 1);
+    const product = await startupProduct(stage, '创业补偿甲', 4);
+    await credit(stage, buyer, 'points', 1000);
 
     const created = await stage.orders.create(buyer, {
       zone: PRODUCT_ZONE_STARTUP,
       addressId,
-      items: [{ productId: product.id, quantity: 1 }],
+      items: [{ productId: product.id, quantity: 2 }],
     });
     const started = await stage.orders.pay(buyer, created.id);
     expect(started.wechat?.payNo).toBeTruthy();
+    expect(started.order.pointsFen).toBe(1000);
+    expect(started.order.wechatFen).toBe(1000);
 
-    // 支付等待期间库存被别的订单买光（结算时才扣库存）
-    stage.db.skuStock.update({
-      where: { skuId: product.skuId },
-      data: { quantity: 0 },
+    // 冻结还在，但账户余额被别处扣走：结算时收不回这副份额
+    stage.db.walletAccount.update({
+      where: { userId: buyer, walletType: 'points' },
+      data: { balanceFen: 0n },
     });
     const paid = await stage.wechatPay.simulateSuccess(started.wechat!.payNo);
     expect(paid.status).toBe('success');
@@ -74,9 +76,9 @@ describe('settlement compensation', () => {
       payNo: started.wechat!.payNo,
       amountFen: 1000,
       status: 'auto_retry',
-      failReason: 'stock_insufficient',
+      failReason: 'wallet_shortfall',
     });
-    expect(rows[0]!.lastError).toBe('库存不足');
+    expect(rows[0]!.lastError).toBe('钱包份额不足');
 
     // 微信实收已入账，对账不会缺这一笔
     expect(
@@ -91,12 +93,18 @@ describe('settlement compensation', () => {
     expect(compRows(stage)).toHaveLength(1);
     expect(cashRows(stage).filter((row) => row.bizType === 'order_wechat')).toHaveLength(1);
 
-    // 人工补货后点「继续结算」
-    stage.db.skuStock.update({ where: { skuId: product.skuId }, data: { quantity: 5 } });
+    // 第一次重试判定为「重试也没用」：转待人工，不再空转
+    const flipped = await stage.compensations.retryOne(rows[0]!.id);
+    expect(flipped.status).toBe('awaiting_operation');
+
+    // 把被花掉的份额补回账户后点「继续结算」
+    stage.db.walletAccount.update({
+      where: { userId: buyer, walletType: 'points' },
+      data: { balanceFen: 1000n },
+    });
     const view = await stage.compensations.retryOne(rows[0]!.id);
     expect(view.status).toBe('completed');
     expect(orderRow(stage, created.id).status).toBe('paid');
-    expect(stockOf(stage.db, product.skuId)).toBe(4);
     expect(marketNode(stage.db, buyer)?.parentUserId).toBe(rootId);
     expect(
       cashRows(stage).filter((row) => row.bizType === 'order_wechat' && row.direction === 'inflow'),
@@ -156,7 +164,11 @@ describe('settlement compensation', () => {
     const started = await stage.orders.pay(buyer, created.id);
     expect(started.order.pointsFen).toBe(1000);
     expect(started.order.wechatFen).toBe(1000);
-    stage.db.skuStock.update({ where: { skuId: product.skuId }, data: { quantity: 0 } });
+    // 超时关单抢先：钱已收、单已关，补偿先进入自动重试
+    stage.db.order.update({
+      where: { id: created.id },
+      data: { status: 'closed', closedAt: stage.clock.current },
+    });
     await stage.wechatPay.simulateSuccess(started.wechat!.payNo);
     expect(compRows(stage)).toHaveLength(1);
 
@@ -176,10 +188,9 @@ describe('settlement compensation', () => {
     const short = await stage.compensations.retryOne(compRows(stage)[0]!.id);
     expect(short.status).toBe('awaiting_operation');
     expect(short.failReason).toBe('wallet_shortfall');
-    expect(orderRow(stage, created.id).status).toBe('pending_payment');
+    expect(orderRow(stage, created.id).status).toBe('closed');
 
-    // 平台补差按订单拆分份额补足（创业专区：积分+可提现），补货后继续结算
-    stage.db.skuStock.update({ where: { skuId: product.skuId }, data: { quantity: 2 } });
+    // 平台补差按订单拆分份额补足（创业专区：积分+可提现），随后继续结算
     const done = await stage.compensations.retryOne(compRows(stage)[0]!.id, {
       subsidize: true,
       adminId: 1n,
@@ -210,7 +221,10 @@ describe('settlement compensation', () => {
     });
     const started = await stage.orders.pay(buyer, created.id);
     expect(started.order.withdrawableFen).toBe(1000);
-    stage.db.skuStock.update({ where: { skuId: product.skuId }, data: { quantity: 0 } });
+    stage.db.order.update({
+      where: { id: created.id },
+      data: { status: 'closed', closedAt: stage.clock.current },
+    });
     await stage.wechatPay.simulateSuccess(started.wechat!.payNo);
 
     const view = await stage.compensations.refund(compRows(stage)[0]!.id, 9n);
@@ -223,6 +237,6 @@ describe('settlement compensation', () => {
         (row) => row.bizType === 'wechat_refund' && row.direction === 'outflow',
       ),
     ).toHaveLength(1);
-    expect(orderRow(stage, created.id).status).toBe('pending_payment');
+    expect(orderRow(stage, created.id).status).toBe('closed');
   });
 });
