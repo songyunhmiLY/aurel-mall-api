@@ -69,11 +69,11 @@ export interface LockedRuntimeConfig {
    */
   opsTeamMallDividendRatioBps: number;
   /**
-   * 提现手续费，单位分。打款时从申请金额里减去当时的这个值。
-   * TODO: 需求 §1.1 的仓库清单里没有这项。任务要求手续费来自锁定配置，
-   * 且实付 = 申请金额 − 手续费，因此按固定分而不是比例解析。正式金额未确认。
+   * 提现手续费率，万分比。打款金额 = 申请金额 × (1 − 本比例)，向下取整到分。
+   * 财务按这个比例在线下算出应打款金额完成转账，再回系统标记打款完成。
+   * 按打款确认时的锁定值计算，不是申请时的值。0 表示不收手续费。
    */
-  withdrawalFeeFen: number;
+  withdrawalFeeBps: number;
 }
 
 export const LOCKED_RUNTIME_ENV_KEYS = [
@@ -99,7 +99,7 @@ export const LOCKED_RUNTIME_ENV_KEYS = [
   'STUDIO_MALL_SUBSIDY_RATIO_BPS',
   'OPS_TEAM_STARTUP_DIVIDEND_RATIO_BPS',
   'OPS_TEAM_MALL_DIVIDEND_RATIO_BPS',
-  'WITHDRAWAL_FEE_FEN',
+  'WITHDRAWAL_FEE_BPS',
 ] as const;
 
 const BPS_MAX = 10_000;
@@ -156,7 +156,7 @@ export function parseLockedRuntimeConfig(source: NodeJS.ProcessEnv): LockedRunti
       min: 0,
       max: BPS_MAX,
     }),
-    withdrawalFeeFen: readInt(source, 'WITHDRAWAL_FEE_FEN', { min: 0 }),
+    withdrawalFeeBps: readInt(source, 'WITHDRAWAL_FEE_BPS', { min: 0, max: BPS_MAX }),
   });
 }
 

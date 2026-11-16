@@ -109,7 +109,7 @@ export function integrationLocked() {
     startupPointRatioBps: 200,
     mallSalesRatioBps: 500,
     mallPointRatioBps: 200,
-    withdrawalFeeFen: 100,
+    withdrawalFeeBps: 100,
   });
 }
 
@@ -201,7 +201,7 @@ export function buildIntHarness(databaseUrl: string) {
     wallet,
     kyc,
     cash,
-    env.locked as Pick<typeof env.locked, 'withdrawalFeeFen'>,
+    env.locked as Pick<typeof env.locked, 'withdrawalFeeBps'>,
   );
   const refunds = new RefundsService(
     prisma,

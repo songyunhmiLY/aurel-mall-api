@@ -41,6 +41,10 @@ export interface WithdrawalView {
   id: bigint;
   userId: bigint;
   amountFen: bigint;
+  /** 按当前锁定费率算出的手续费。财务据此算线下应打款金额，实际以打款确认时为准。 */
+  feePreviewFen: bigint;
+  /** 按当前锁定费率算出的应打款金额 = 申请金额 − 手续费。 */
+  payoutPreviewFen: bigint;
   status: string;
   accountName: string;
   bankName: string;
@@ -59,7 +63,8 @@ export interface WithdrawalPage {
 
 /**
  * 会员提现。申请时冻结可提现金额，驳回则解冻。
- * 打款金额 = 申请金额 − 打款当时的锁定手续费。财务线下打款，系统不自动支付。
+ * 打款金额 = 申请金额 ×（1 − 打款当时的锁定手续费率），向下取整到分。
+ * 财务按这个金额在线下完成转账，再回系统标记打款完成，系统发事件通知；系统不自动支付。
  * 有未结算的商城退款时不能申请。
  */
 @Injectable()
@@ -71,7 +76,7 @@ export class WithdrawalService {
     private readonly kyc: KycService,
     private readonly cash: CashLedgerService,
     @Inject(LOCKED_RUNTIME_CONFIG)
-    private readonly fees: Pick<LockedRuntimeConfig, 'withdrawalFeeFen'>,
+    private readonly fees: Pick<LockedRuntimeConfig, 'withdrawalFeeBps'>,
   ) {}
 
   async apply(userId: bigint, amountFen: bigint): Promise<WithdrawalView> {
@@ -128,7 +133,7 @@ export class WithdrawalService {
       });
       return created;
     });
-    return toView(created, null);
+    return toView(created, null, this.fees.withdrawalFeeBps);
   }
 
   async listForUser(userId: bigint, page: number, pageSize: number): Promise<WithdrawalPage> {
@@ -143,7 +148,7 @@ export class WithdrawalService {
     const settlement = await this.prisma.withdrawalSettlement.findUnique({
       where: { applicationId: row.id },
     });
-    return toView(row, settlement);
+    return toView(row, settlement, this.fees.withdrawalFeeBps);
   }
 
   async listAdmin(query: {
@@ -178,7 +183,7 @@ export class WithdrawalService {
     const settlement = await this.prisma.withdrawalSettlement.findUnique({
       where: { applicationId: row.id },
     });
-    return toView(row, settlement);
+    return toView(row, settlement, this.fees.withdrawalFeeBps);
   }
 
   async reject(id: bigint, adminId: bigint): Promise<WithdrawalView> {
@@ -221,17 +226,14 @@ export class WithdrawalService {
       });
       return { updated, settlement };
     });
-    return toView(row.updated, row.settlement);
+    return toView(row.updated, row.settlement, this.fees.withdrawalFeeBps);
   }
 
   async payout(id: bigint, adminId: bigint): Promise<WithdrawalView> {
-    const feeFen = this.currentFeeFen();
     const now = await this.clock.now();
     const row = await this.prisma.$transaction(async (tx) => {
       const current = await this.requirePending(tx, id);
-      if (feeFen > current.amountFen) {
-        throw new ConflictException('当前手续费高于提现金额，无法打款');
-      }
+      const feeFen = this.feeOf(current.amountFen);
       const payoutFen = current.amountFen - feeFen;
       await this.wallet.lockAll(tx, current.userId, now);
       await this.wallet.captureFrozen(
@@ -277,15 +279,16 @@ export class WithdrawalService {
       });
       return { updated, settlement };
     });
-    return toView(row.updated, row.settlement);
+    return toView(row.updated, row.settlement, this.fees.withdrawalFeeBps);
   }
 
-  private currentFeeFen(): bigint {
-    const fee = this.fees.withdrawalFeeFen;
-    if (!Number.isSafeInteger(fee) || fee < 0) {
-      throw new ConflictException('提现手续费配置无效');
+  /** 手续费 = 申请金额 × 万分比，向下取整到分（不足一分的零头不计）。 */
+  private feeOf(amountFen: bigint): bigint {
+    const bps = this.fees.withdrawalFeeBps;
+    if (!Number.isSafeInteger(bps) || bps < 0 || bps > 10_000) {
+      throw new ConflictException('提现手续费率配置无效');
     }
-    return BigInt(fee);
+    return (amountFen * BigInt(bps)) / 10_000n;
   }
 
   private async requirePending(
@@ -321,7 +324,7 @@ export class WithdrawalService {
       const settlement = await this.prisma.withdrawalSettlement.findUnique({
         where: { applicationId: row.id },
       });
-      items.push(toView(row, settlement));
+      items.push(toView(row, settlement, this.fees.withdrawalFeeBps));
     }
     return { items, total, page, pageSize };
   }
@@ -330,11 +333,15 @@ export class WithdrawalService {
 function toView(
   row: WithdrawalApplication,
   settlement: WithdrawalSettlement | null,
+  feeBps: number,
 ): WithdrawalView {
+  const feePreviewFen = (row.amountFen * BigInt(feeBps)) / 10_000n;
   return {
     id: row.id,
     userId: row.userId,
     amountFen: row.amountFen,
+    feePreviewFen,
+    payoutPreviewFen: row.amountFen - feePreviewFen,
     status: row.status,
     accountName: row.accountName,
     bankName: row.bankName,

@@ -56,7 +56,7 @@ function env(allowClockOverride: boolean): AppEnv {
       studioMallSubsidyRatioBps: 0,
       opsTeamStartupDividendRatioBps: 0,
       opsTeamMallDividendRatioBps: 0,
-      withdrawalFeeFen: 0,
+      withdrawalFeeBps: 0,
     }),
   };
 }
