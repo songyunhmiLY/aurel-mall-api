@@ -1,5 +1,13 @@
-import { ConflictException, HttpException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  HttpException,
+  Inject,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
+import type { LockedRuntimeConfig } from '../../config/locked-runtime';
+import { LOCKED_RUNTIME_CONFIG } from '../../config/tokens';
 import { PRODUCT_ZONE_STARTUP } from '../catalog/catalog.constants';
 import { WECHAT_PAY_CHANNEL } from '../payments/wechat-pay.constants';
 import { TreesService } from '../rewards/trees/trees.service';
@@ -68,6 +76,7 @@ export class OrderPaymentSettler {
     private readonly trees: TreesService,
     private readonly hook: PendingSettlementHook,
     private readonly cash: CashLedgerService,
+    @Inject(LOCKED_RUNTIME_CONFIG) private readonly locked: LockedRuntimeConfig,
   ) {}
 
   async settleWechatSuccess(tx: Tx, orderId: bigint, now: Date): Promise<string> {
@@ -131,9 +140,12 @@ export class OrderPaymentSettler {
 
   /**
    * 人工强制完成结算（管理端「手动完成结算」按钮）。
-   * 与 finishForCompensation 的区别：钱包份额不够时不失败，而是扣到空、
+   * 与 finishForCompensation 的区别：钱包份额不够时不失败，而是扣到可扣尽的最低值、
    * 把缺口写进订单备注；入座失败也不阻塞，跳过并写备注。供运营在系统外
    * 处理完后一键把订单恢复为已支付。
+   *
+   * 创业专区的扣款与正常支付同一口径：每个账户只扣单价的整数倍，
+   * 不足单价的零头留在账户里不动。
    * 返回写入订单备注的说明文本。
    */
   async forceFinish(tx: Tx, orderId: bigint, now: Date): Promise<string> {
@@ -154,9 +166,14 @@ export class OrderPaymentSettler {
     };
     const yuan = (fen: bigint): string => `¥${(Number(fen) / 100).toFixed(2)}`;
     const notes: string[] = [];
+    const unitPrice = this.locked.startupZoneUnitPriceFen;
+    const alignFen =
+      order.zone === PRODUCT_ZONE_STARTUP && Number.isInteger(unitPrice) && unitPrice > 0
+        ? BigInt(unitPrice)
+        : 0n;
     const held = await tx.walletHold.findFirst({ where: { orderId, status: HOLD_HELD } });
     const shortfalls = held
-      ? await this.wallet.captureHoldsPartial(tx, orderId, now)
+      ? await this.wallet.captureHoldsPartial(tx, orderId, now, alignFen)
       : await this.wallet.debitPartial(
           tx,
           order.userId,
@@ -167,10 +184,13 @@ export class OrderPaymentSettler {
           ],
           orderId,
           now,
+          alignFen,
         );
     for (const { walletType, shortfallFen } of shortfalls) {
       const name = walletNames[walletType] ?? walletType;
-      notes.push(`${name}缺口 ${yuan(shortfallFen)}，余额已扣至可扣尽的最低值`);
+      const limit =
+        alignFen > 0n ? '余额已按单价对齐扣款，不足单价的零头留在账户' : '余额已扣至可扣尽的最低值';
+      notes.push(`${name}缺口 ${yuan(shortfallFen)}，${limit}`);
     }
     if (shortfalls.length === 0) {
       notes.push('钱包份额足额扣款');

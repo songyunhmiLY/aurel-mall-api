@@ -92,7 +92,7 @@ export function buildStage4(locked: LockedRuntimeConfig = stage4Locked(), thresh
   );
   const hook = new PaymentSettlementHook(paid);
   const cash = new CashLedgerService();
-  const settlement = new OrderPaymentSettler(wallet, trees, hook, cash);
+  const settlement = new OrderPaymentSettler(wallet, trees, hook, cash, locked);
   const paySettings: {
     credentials: WechatPayCredentials | null;
     readCredentials(): Promise<WechatPayCredentials | null>;

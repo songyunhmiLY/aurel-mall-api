@@ -154,7 +154,7 @@ export function buildIntHarness(databaseUrl: string) {
   );
   const hook = new PaymentSettlementHook(paid);
   const cash = new CashLedgerService();
-  const settlement = new OrderPaymentSettler(wallet, trees, hook, cash);
+  const settlement = new OrderPaymentSettler(wallet, trees, hook, cash, env.locked);
 
   const paySettings: {
     credentials: WechatPayCredentials | null;

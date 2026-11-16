@@ -421,14 +421,18 @@ export class WalletService {
   }
 
   /**
-   * 人工强制完成结算用：把这笔订单的冻结尽可能转成扣款，余额不够就扣到空。
+   * 人工强制完成结算用：把这笔订单的冻结尽可能转成扣款，余额不够就扣到可扣尽的最低值。
    * 与 captureHolds 的区别是不抛「余额不足」：每个账户按 min(冻结, 余额) 实扣，
    * 冻结全额作废，缺口由调用方写进订单备注。
+   *
+   * `alignFen` 大于 0 时（创业专区），扣款金额向下对齐到单价整数倍，
+   * 不足单价的零头留在账户里，与正常支付同一口径。
    */
   async captureHoldsPartial(
     tx: Tx,
     orderId: bigint,
     now: Date,
+    alignFen = 0n,
   ): Promise<Array<{ walletType: WalletType; shortfallFen: bigint }>> {
     const preview = await tx.walletHold.findFirst({ where: { orderId, status: HOLD_HELD } });
     if (!preview) {
@@ -445,7 +449,10 @@ export class WalletService {
         throw new InternalServerErrorException('钱包账户不存在');
       }
       const account = await this.requireAccount(tx, hold.userId, hold.walletType);
-      const deduct = hold.amountFen < account.balanceFen ? hold.amountFen : account.balanceFen;
+      let deduct = hold.amountFen < account.balanceFen ? hold.amountFen : account.balanceFen;
+      if (alignFen > 0n) {
+        deduct = (deduct / alignFen) * alignFen;
+      }
       const release = hold.amountFen < account.frozenFen ? hold.amountFen : account.frozenFen;
       const balanceFen = account.balanceFen - deduct;
       await tx.walletAccount.update({
@@ -482,7 +489,10 @@ export class WalletService {
 
   /**
    * 人工强制完成结算用（冻结已被释放的订单）：按订单份额尽量扣可用余额，
-   * 扣到空为止，不抛「余额不足」，缺口由调用方写进订单备注。
+   * 扣到可扣尽的最低值为止，不抛「余额不足」，缺口由调用方写进订单备注。
+   *
+   * `alignFen` 大于 0 时（创业专区），扣款金额向下对齐到单价整数倍，
+   * 不足单价的零头留在账户里，与正常支付同一口径。
    */
   async debitPartial(
     tx: Tx,
@@ -490,6 +500,7 @@ export class WalletService {
     portions: Array<[WalletType, number]>,
     orderId: bigint,
     now: Date,
+    alignFen = 0n,
   ): Promise<Array<{ walletType: WalletType; shortfallFen: bigint }>> {
     await this.lockAll(tx, userId, now);
     const shortfalls: Array<{ walletType: WalletType; shortfallFen: bigint }> = [];
@@ -500,7 +511,10 @@ export class WalletService {
       const target = BigInt(amount);
       const account = await this.requireAccount(tx, userId, walletType);
       const available = account.balanceFen - account.frozenFen;
-      const deduct = target < available ? target : available;
+      let deduct = target < available ? target : available;
+      if (alignFen > 0n) {
+        deduct = (deduct / alignFen) * alignFen;
+      }
       if (deduct > 0n) {
         const balanceFen = account.balanceFen - deduct;
         await tx.walletAccount.update({

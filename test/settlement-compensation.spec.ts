@@ -343,4 +343,68 @@ describe('settlement compensation', () => {
     expect(orderRow(stage, created.id).status).toBe('paid');
     expect(marketNode(stage.db, buyer)?.parentUserId).toBe(rootId);
   });
+
+  it('force-completes a startup order without touching the sub-unit remainder', async () => {
+    const stage = buildStage2();
+    const rootId = await boot(stage);
+    const buyer = await loginBuyer(stage, 'force-align', rootId);
+    const addressId = await addressOf(stage, buyer);
+    await credit(stage, buyer, 'points', 1000);
+    const created = await stage.orders.create(buyer, {
+      zone: PRODUCT_ZONE_STARTUP,
+      addressId,
+      items: [{ productId: (await startupProduct(stage, '创业装H', 1)).id, quantity: 2 }],
+    });
+    const started = await stage.orders.pay(buyer, created.id);
+    expect(started.order.pointsFen).toBe(1000);
+
+    // 余额只剩不足一个单价的零头：按单价对齐后一分都扣不了，零头必须留下
+    stage.db.walletAccount.update({
+      where: { userId: buyer, walletType: 'points' },
+      data: { balanceFen: 500n },
+    });
+    await stage.wechatPay.simulateSuccess(started.wechat!.payNo);
+    expect(orderRow(stage, created.id).status).toBe('pending_payment');
+
+    const result = await stage.compensations.forceComplete(created.id, 7n);
+    expect(result.view.status).toBe('completed');
+    expect(result.note).toContain('积分缺口 ¥10.00');
+    expect(result.note).toContain('零头留在账户');
+    expect(orderRow(stage, created.id).status).toBe('paid');
+
+    const balances = await stage.wallet.getBalances(buyer);
+    expect(balances.points.balanceFen).toBe(500n);
+    expect(balances.points.frozenFen).toBe(0n);
+  });
+
+  it('force-completes a startup order up to the unit-aligned limit', async () => {
+    const stage = buildStage2();
+    const rootId = await boot(stage);
+    const buyer = await loginBuyer(stage, 'force-align-part', rootId);
+    const addressId = await addressOf(stage, buyer);
+    await credit(stage, buyer, 'points', 2000);
+    const created = await stage.orders.create(buyer, {
+      zone: PRODUCT_ZONE_STARTUP,
+      addressId,
+      items: [{ productId: (await startupProduct(stage, '创业装I', 1)).id, quantity: 3 }],
+    });
+    const started = await stage.orders.pay(buyer, created.id);
+    expect(started.order.pointsFen).toBe(2000);
+
+    // 余额 1500：能扣 1 个单价（1000），剩下 500 是零头，不扣
+    stage.db.walletAccount.update({
+      where: { userId: buyer, walletType: 'points' },
+      data: { balanceFen: 1500n },
+    });
+    await stage.wechatPay.simulateSuccess(started.wechat!.payNo);
+    expect(orderRow(stage, created.id).status).toBe('pending_payment');
+
+    const result = await stage.compensations.forceComplete(created.id, 7n);
+    expect(result.view.status).toBe('completed');
+    expect(result.note).toContain('积分缺口 ¥10.00');
+    expect(orderRow(stage, created.id).status).toBe('paid');
+
+    const balances = await stage.wallet.getBalances(buyer);
+    expect(balances.points.balanceFen).toBe(500n);
+  });
 });

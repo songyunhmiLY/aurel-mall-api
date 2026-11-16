@@ -41,7 +41,7 @@ export function buildStage2(unitPriceFen = 1000) {
   const trees = new TreesService();
   const hook = new RecordingHook();
   const cash = new CashLedgerService();
-  const settlement = new OrderPaymentSettler(wallet, trees, hook, cash);
+  const settlement = new OrderPaymentSettler(wallet, trees, hook, cash, env.locked);
   const paySettings: {
     credentials: WechatPayCredentials | null;
     readCredentials(): Promise<WechatPayCredentials | null>;
