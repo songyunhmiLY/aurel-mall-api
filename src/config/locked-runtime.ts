@@ -68,12 +68,6 @@ export interface LockedRuntimeConfig {
    * 官方示例 700 = 7%。与创业专区那条分开配置，都不是管理端可改项。
    */
   opsTeamMallDividendRatioBps: number;
-  /**
-   * 提现手续费率，万分比。打款金额 = 申请金额 × (1 − 本比例)，向下取整到分。
-   * 财务按这个比例在线下算出应打款金额完成转账，再回系统标记打款完成。
-   * 按打款确认时的锁定值计算，不是申请时的值。0 表示不收手续费。
-   */
-  withdrawalFeeBps: number;
 }
 
 export const LOCKED_RUNTIME_ENV_KEYS = [
@@ -99,7 +93,6 @@ export const LOCKED_RUNTIME_ENV_KEYS = [
   'STUDIO_MALL_SUBSIDY_RATIO_BPS',
   'OPS_TEAM_STARTUP_DIVIDEND_RATIO_BPS',
   'OPS_TEAM_MALL_DIVIDEND_RATIO_BPS',
-  'WITHDRAWAL_FEE_BPS',
 ] as const;
 
 const BPS_MAX = 10_000;
@@ -156,7 +149,6 @@ export function parseLockedRuntimeConfig(source: NodeJS.ProcessEnv): LockedRunti
       min: 0,
       max: BPS_MAX,
     }),
-    withdrawalFeeBps: readInt(source, 'WITHDRAWAL_FEE_BPS', { min: 0, max: BPS_MAX }),
   });
 }
 

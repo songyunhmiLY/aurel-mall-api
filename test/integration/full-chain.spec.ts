@@ -196,8 +196,8 @@ describe('integration: full chain on real MySQL', () => {
     expect(paidView.settlement).toMatchObject({
       outcome: 'paid',
       amountFen: 10000n,
-      feeFen: 100n,
-      payoutFen: 9900n,
+      feeFen: null,
+      payoutFen: 10000n,
     });
     const afterPayout = await balancesOf(stage, payer);
     expect(afterPayout.withdrawable).toMatchObject({ balanceFen: 10000n, frozenFen: 0n });
@@ -206,7 +206,7 @@ describe('integration: full chain on real MySQL', () => {
       where: { bizType: 'withdrawal_payout' },
     });
     expect(payoutOutflows).toHaveLength(1);
-    expect(payoutOutflows[0]).toMatchObject({ direction: 'outflow', amountFen: 9900n });
+    expect(payoutOutflows[0]).toMatchObject({ direction: 'outflow', amountFen: 10000n });
 
     // 驳回路径解冻
     const other = await loginBuyer(stage, 'it-reject', rootId);

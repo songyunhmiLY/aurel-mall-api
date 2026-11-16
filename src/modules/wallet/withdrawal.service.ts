@@ -2,7 +2,6 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
-  Inject,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -10,8 +9,6 @@ import type { Prisma, WithdrawalApplication, WithdrawalSettlement } from '@prism
 import { ClockService } from '../../common/clock/clock.service';
 import { enqueueNotify } from '../../common/notify/notify-buffer';
 import { PrismaService } from '../../common/prisma/prisma.service';
-import type { LockedRuntimeConfig } from '../../config/locked-runtime';
-import { LOCKED_RUNTIME_CONFIG } from '../../config/tokens';
 import { KycService } from '../users/kyc.service';
 import { USER_STATUS_ACTIVE } from '../../common/auth/user-status';
 import { CashLedgerService } from './cash-ledger.service';
@@ -41,10 +38,6 @@ export interface WithdrawalView {
   id: bigint;
   userId: bigint;
   amountFen: bigint;
-  /** 按当前锁定费率算出的手续费。财务据此算线下应打款金额，实际以打款确认时为准。 */
-  feePreviewFen: bigint;
-  /** 按当前锁定费率算出的应打款金额 = 申请金额 − 手续费。 */
-  payoutPreviewFen: bigint;
   status: string;
   accountName: string;
   bankName: string;
@@ -63,8 +56,9 @@ export interface WithdrawalPage {
 
 /**
  * 会员提现。申请时冻结可提现金额，驳回则解冻。
- * 打款金额 = 申请金额 ×（1 − 打款当时的锁定手续费率），向下取整到分。
- * 财务按这个金额在线下完成转账，再回系统标记打款完成，系统发事件通知；系统不自动支付。
+ * 平台不收手续费：打款金额就是申请金额，账上按申请金额全额记现金流出。
+ * 银行若另行扣费，那是银行与用户之间的事，不进平台账。
+ * 财务线下转账后回系统标记打款完成，系统发事件通知；系统不自动支付。
  * 有未结算的商城退款时不能申请。
  */
 @Injectable()
@@ -75,8 +69,6 @@ export class WithdrawalService {
     private readonly wallet: WalletService,
     private readonly kyc: KycService,
     private readonly cash: CashLedgerService,
-    @Inject(LOCKED_RUNTIME_CONFIG)
-    private readonly fees: Pick<LockedRuntimeConfig, 'withdrawalFeeBps'>,
   ) {}
 
   async apply(userId: bigint, amountFen: bigint): Promise<WithdrawalView> {
@@ -133,7 +125,7 @@ export class WithdrawalService {
       });
       return created;
     });
-    return toView(created, null, this.fees.withdrawalFeeBps);
+    return toView(created, null);
   }
 
   async listForUser(userId: bigint, page: number, pageSize: number): Promise<WithdrawalPage> {
@@ -148,7 +140,7 @@ export class WithdrawalService {
     const settlement = await this.prisma.withdrawalSettlement.findUnique({
       where: { applicationId: row.id },
     });
-    return toView(row, settlement, this.fees.withdrawalFeeBps);
+    return toView(row, settlement);
   }
 
   async listAdmin(query: {
@@ -183,7 +175,7 @@ export class WithdrawalService {
     const settlement = await this.prisma.withdrawalSettlement.findUnique({
       where: { applicationId: row.id },
     });
-    return toView(row, settlement, this.fees.withdrawalFeeBps);
+    return toView(row, settlement);
   }
 
   async reject(id: bigint, adminId: bigint): Promise<WithdrawalView> {
@@ -226,15 +218,14 @@ export class WithdrawalService {
       });
       return { updated, settlement };
     });
-    return toView(row.updated, row.settlement, this.fees.withdrawalFeeBps);
+    return toView(row.updated, row.settlement);
   }
 
   async payout(id: bigint, adminId: bigint): Promise<WithdrawalView> {
     const now = await this.clock.now();
     const row = await this.prisma.$transaction(async (tx) => {
       const current = await this.requirePending(tx, id);
-      const feeFen = this.feeOf(current.amountFen);
-      const payoutFen = current.amountFen - feeFen;
+      const payoutFen = current.amountFen;
       await this.wallet.lockAll(tx, current.userId, now);
       await this.wallet.captureFrozen(
         tx,
@@ -249,13 +240,14 @@ export class WithdrawalService {
         where: { id: current.id },
         data: { status: WITHDRAWAL_PAID, updatedAt: now },
       });
+      // 平台不收手续费：feeFen 记 null，payoutFen 与申请金额相等。
       const settlement = await tx.withdrawalSettlement.create({
         data: {
           applicationId: current.id,
           userId: current.userId,
           outcome: WITHDRAWAL_PAID,
           amountFen: current.amountFen,
-          feeFen,
+          feeFen: null,
           payoutFen,
           adminId,
           settledAt: now,
@@ -279,16 +271,7 @@ export class WithdrawalService {
       });
       return { updated, settlement };
     });
-    return toView(row.updated, row.settlement, this.fees.withdrawalFeeBps);
-  }
-
-  /** 手续费 = 申请金额 × 万分比，向下取整到分（不足一分的零头不计）。 */
-  private feeOf(amountFen: bigint): bigint {
-    const bps = this.fees.withdrawalFeeBps;
-    if (!Number.isSafeInteger(bps) || bps < 0 || bps > 10_000) {
-      throw new ConflictException('提现手续费率配置无效');
-    }
-    return (amountFen * BigInt(bps)) / 10_000n;
+    return toView(row.updated, row.settlement);
   }
 
   private async requirePending(
@@ -324,7 +307,7 @@ export class WithdrawalService {
       const settlement = await this.prisma.withdrawalSettlement.findUnique({
         where: { applicationId: row.id },
       });
-      items.push(toView(row, settlement, this.fees.withdrawalFeeBps));
+      items.push(toView(row, settlement));
     }
     return { items, total, page, pageSize };
   }
@@ -333,15 +316,11 @@ export class WithdrawalService {
 function toView(
   row: WithdrawalApplication,
   settlement: WithdrawalSettlement | null,
-  feeBps: number,
 ): WithdrawalView {
-  const feePreviewFen = (row.amountFen * BigInt(feeBps)) / 10_000n;
   return {
     id: row.id,
     userId: row.userId,
     amountFen: row.amountFen,
-    feePreviewFen,
-    payoutPreviewFen: row.amountFen - feePreviewFen,
     status: row.status,
     accountName: row.accountName,
     bankName: row.bankName,

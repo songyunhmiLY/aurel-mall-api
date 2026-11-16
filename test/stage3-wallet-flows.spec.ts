@@ -37,14 +37,14 @@ const BANK = {
   branchName: '杭州西湖支行',
 };
 
-function wire(stage: Stage2, fees = { withdrawalFeeBps: 100 }) {
+function wire(stage: Stage2) {
   const prisma = stage.db as unknown as PrismaService;
   const clock = stage.clock as unknown as ClockService;
   const passwords = new PaymentPasswordService(prisma, clock);
   const banks = new BankAccountService(prisma, clock);
   const transfers = new TransferService(prisma, clock, stage.wallet, passwords);
   const cash = new CashLedgerService();
-  const withdrawals = new WithdrawalService(prisma, clock, stage.wallet, stage.kyc, cash, fees);
+  const withdrawals = new WithdrawalService(prisma, clock, stage.wallet, stage.kyc, cash);
   const names = new DisplayNameService(prisma, clock, stage.wallet);
   const refunds = new RefundsService(
     prisma,
@@ -54,7 +54,7 @@ function wire(stage: Stage2, fees = { withdrawalFeeBps: 100 }) {
     stage.paySettings as unknown as WechatPaySettingsService,
     stage.gateway as unknown as WechatPayGateway,
   );
-  return { passwords, banks, transfers, withdrawals, names, refunds, fees };
+  return { passwords, banks, transfers, withdrawals, names, refunds };
 }
 
 function makeMember(stage: Stage2, userId: bigint, nickname?: string): void {
@@ -142,13 +142,12 @@ describe('stage 3 wallets, transfers, withdrawals, and mall refunds', () => {
     expect(stage.db.userKyc.rows.some((row) => row.userId === payer)).toBe(false);
   });
 
-  it('freezes a member withdrawal, unfreezes on reject, and uses the fee at payout', async () => {
+  it('freezes a member withdrawal, unfreezes on reject, and pays the full amount', async () => {
     const stage = buildStage2();
     const rootId = await boot(stage);
     const userId = await loginBuyer(stage, 'withdrawer', rootId);
     const stranger = await loginBuyer(stage, 'stranger', rootId);
-    const fees = { withdrawalFeeBps: 100 };
-    const { banks, withdrawals } = wire(stage, fees);
+    const { banks, withdrawals } = wire(stage);
     await credit(stage, userId, 'withdrawable', 30_000);
     await credit(stage, stranger, 'withdrawable', 30_000);
     await banks.save(userId, BANK);
@@ -190,10 +189,10 @@ describe('stage 3 wallets, transfers, withdrawals, and mall refunds', () => {
     });
 
     const again = await withdrawals.apply(userId, 10_000n);
-    fees.withdrawalFeeBps = 300;
     const paid = await withdrawals.payout(again.id, 7n);
     expect(paid.status).toBe('paid');
-    expect(paid.settlement).toMatchObject({ outcome: 'paid', feeFen: 300n, payoutFen: 9_700n });
+    // 平台不收手续费：结算记录里没有手续费，打款金额等于申请金额。
+    expect(paid.settlement).toMatchObject({ outcome: 'paid', feeFen: null, payoutFen: 10_000n });
     expect((await stage.wallet.getBalances(userId)).withdrawable).toMatchObject({
       balanceFen: 20_000n,
       frozenFen: 0n,
@@ -201,19 +200,12 @@ describe('stage 3 wallets, transfers, withdrawals, and mall refunds', () => {
     expect(nonOrderCashRows(stage.db)).toEqual([
       expect.objectContaining({
         direction: 'outflow',
-        amountFen: 9_700n,
+        amountFen: 10_000n,
         bizType: 'withdrawal_payout',
         bizId: again.id.toString(),
       }),
     ]);
     await expect(withdrawals.payout(again.id, 7n)).rejects.toThrow('提现申请已处理');
-
-    // 费率超过 100% 属于非法配置：拒绝打款，冻结金额保持不变。
-    fees.withdrawalFeeBps = 20_000;
-    const blocked = await withdrawals.apply(userId, 10_000n);
-    await expect(withdrawals.payout(blocked.id, 7n)).rejects.toThrow('提现手续费率配置无效');
-    expect((await stage.wallet.getBalances(userId)).withdrawable.frozenFen).toBe(10_000n);
-    expect(blocked.status).toBe('pending');
   });
 
   it('groups withdrawal display categories by the configured name', async () => {
@@ -436,8 +428,7 @@ describe('stage 3 wallets, transfers, withdrawals, and mall refunds', () => {
     const rootId = await boot(stage);
     const buyer = await loginBuyer(stage, 'mutex', rootId);
     makeMember(stage, buyer);
-    const fees = { withdrawalFeeBps: 0 };
-    const { banks, withdrawals, refunds } = wire(stage, fees);
+    const { banks, withdrawals, refunds } = wire(stage);
     await stage.kyc.submit(buyer, KYC);
     await banks.save(buyer, BANK);
     await credit(stage, buyer, 'withdrawable', 50_000);
@@ -613,7 +604,7 @@ describe('stage 3 wallets, transfers, withdrawals, and mall refunds', () => {
     const rootId = await boot(stage);
     const buyer = await loginBuyer(stage, 'mutex-race', rootId);
     makeMember(stage, buyer);
-    const { banks, withdrawals, refunds } = wire(stage, { withdrawalFeeBps: 0 });
+    const { banks, withdrawals, refunds } = wire(stage);
     await stage.kyc.submit(buyer, KYC);
     await banks.save(buyer, BANK);
     await credit(stage, buyer, 'withdrawable', 50_000);
