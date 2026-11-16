@@ -420,6 +420,112 @@ export class WalletService {
     }
   }
 
+  /**
+   * 人工强制完成结算用：把这笔订单的冻结尽可能转成扣款，余额不够就扣到空。
+   * 与 captureHolds 的区别是不抛「余额不足」：每个账户按 min(冻结, 余额) 实扣，
+   * 冻结全额作废，缺口由调用方写进订单备注。
+   */
+  async captureHoldsPartial(
+    tx: Tx,
+    orderId: bigint,
+    now: Date,
+  ): Promise<Array<{ walletType: WalletType; shortfallFen: bigint }>> {
+    const preview = await tx.walletHold.findFirst({ where: { orderId, status: HOLD_HELD } });
+    if (!preview) {
+      return [];
+    }
+    await this.lockAll(tx, preview.userId, now);
+    const holds = await tx.walletHold.findMany({ where: { orderId, status: HOLD_HELD } });
+    const ordered = [...holds].sort((left, right) =>
+      left.walletType.localeCompare(right.walletType),
+    );
+    const shortfalls: Array<{ walletType: WalletType; shortfallFen: bigint }> = [];
+    for (const hold of ordered) {
+      if (!isWalletType(hold.walletType)) {
+        throw new InternalServerErrorException('钱包账户不存在');
+      }
+      const account = await this.requireAccount(tx, hold.userId, hold.walletType);
+      const deduct = hold.amountFen < account.balanceFen ? hold.amountFen : account.balanceFen;
+      const release = hold.amountFen < account.frozenFen ? hold.amountFen : account.frozenFen;
+      const balanceFen = account.balanceFen - deduct;
+      await tx.walletAccount.update({
+        where: { id: account.id },
+        data: {
+          balanceFen,
+          frozenFen: account.frozenFen - release,
+          updatedAt: now,
+        },
+      });
+      if (deduct > 0n) {
+        await this.writeDebit(
+          tx,
+          account,
+          hold.userId,
+          hold.walletType,
+          deduct,
+          balanceFen,
+          LEDGER_ORDER_PAYMENT,
+          orderId.toString(),
+          now,
+        );
+      }
+      await tx.walletHold.update({
+        where: { id: hold.id },
+        data: { status: HOLD_CAPTURED, updatedAt: now },
+      });
+      if (deduct < hold.amountFen) {
+        shortfalls.push({ walletType: hold.walletType, shortfallFen: hold.amountFen - deduct });
+      }
+    }
+    return shortfalls;
+  }
+
+  /**
+   * 人工强制完成结算用（冻结已被释放的订单）：按订单份额尽量扣可用余额，
+   * 扣到空为止，不抛「余额不足」，缺口由调用方写进订单备注。
+   */
+  async debitPartial(
+    tx: Tx,
+    userId: bigint,
+    portions: Array<[WalletType, number]>,
+    orderId: bigint,
+    now: Date,
+  ): Promise<Array<{ walletType: WalletType; shortfallFen: bigint }>> {
+    await this.lockAll(tx, userId, now);
+    const shortfalls: Array<{ walletType: WalletType; shortfallFen: bigint }> = [];
+    for (const [walletType, amount] of portions) {
+      if (amount <= 0) {
+        continue;
+      }
+      const target = BigInt(amount);
+      const account = await this.requireAccount(tx, userId, walletType);
+      const available = account.balanceFen - account.frozenFen;
+      const deduct = target < available ? target : available;
+      if (deduct > 0n) {
+        const balanceFen = account.balanceFen - deduct;
+        await tx.walletAccount.update({
+          where: { id: account.id },
+          data: { balanceFen, updatedAt: now },
+        });
+        await this.writeDebit(
+          tx,
+          account,
+          userId,
+          walletType,
+          deduct,
+          balanceFen,
+          LEDGER_ORDER_PAYMENT,
+          orderId.toString(),
+          now,
+        );
+      }
+      if (deduct < target) {
+        shortfalls.push({ walletType, shortfallFen: target - deduct });
+      }
+    }
+    return shortfalls;
+  }
+
   /** 冻结已经释放之后，按订单上记下的金额直接扣可用余额。 */
   async debit(
     tx: Tx,

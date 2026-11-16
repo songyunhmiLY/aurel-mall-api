@@ -24,6 +24,8 @@ model Order {
   detail           String    @db.VarChar(255)
   courierName      String?   @map("courier_name") @db.VarChar(64)
   trackingNo       String?   @map("tracking_no") @db.VarChar(64)
+  /// 运营备注。人工强制完成结算时由系统写入钱包缺口与入座处理说明。
+  remark           String?   @db.VarChar(255)
   placedAt         DateTime  @map("placed_at") @db.DateTime(3)
   paidAt           DateTime? @map("paid_at") @db.DateTime(3)
   shippedAt        DateTime? @map("shipped_at") @db.DateTime(3)

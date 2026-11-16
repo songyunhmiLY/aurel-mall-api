@@ -1,6 +1,6 @@
 import { ConflictException } from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
-import { PRODUCT_ZONE_STARTUP } from '../src/modules/catalog/catalog.constants';
+import { PRODUCT_ZONE_MALL, PRODUCT_ZONE_STARTUP } from '../src/modules/catalog/catalog.constants';
 import {
   WALLET_COMPENSATION_SUBSIDY,
 } from '../src/modules/orders/settlement-compensation.constants';
@@ -78,6 +78,11 @@ describe('settlement compensation', () => {
       status: 'auto_retry',
       failReason: 'wallet_shortfall',
     });
+
+    // 订单视图带出结算异常标记，供两端显示黄色「！」
+    const flagged = await stage.orders.getForUser(buyer, created.id);
+    expect(flagged.settlementPending).toBe(true);
+    expect(flagged.compensationId).toBe(rows[0]!.id.toString());
     expect(rows[0]!.lastError).toBe('钱包份额不足');
 
     // 微信实收已入账，对账不会缺这一笔
@@ -105,6 +110,11 @@ describe('settlement compensation', () => {
     const view = await stage.compensations.retryOne(rows[0]!.id);
     expect(view.status).toBe('completed');
     expect(orderRow(stage, created.id).status).toBe('paid');
+
+    // 结算完成后标记自动消失
+    const restored = await stage.orders.getForUser(buyer, created.id);
+    expect(restored.settlementPending).toBe(false);
+    expect(restored.compensationId).toBeNull();
     expect(marketNode(stage.db, buyer)?.parentUserId).toBe(rootId);
     expect(
       cashRows(stage).filter((row) => row.bizType === 'order_wechat' && row.direction === 'inflow'),
@@ -238,5 +248,99 @@ describe('settlement compensation', () => {
       ),
     ).toHaveLength(1);
     expect(orderRow(stage, created.id).status).toBe('closed');
+  });
+
+  it('force-completes a mall order, deducting the shortfall to empty', async () => {
+    const stage = buildStage2();
+    const rootId = await boot(stage);
+    const buyer = await loginBuyer(stage, 'force-mall', rootId);
+    const addressId = await addressOf(stage, buyer);
+
+    // 先买创业装入座成为会员，才有资格买商城
+    const entry = await stage.orders.create(buyer, {
+      zone: PRODUCT_ZONE_STARTUP,
+      addressId,
+      items: [{ productId: (await startupProduct(stage, '创业装F', 1)).id, quantity: 1 }],
+    });
+    const entryPay = await stage.orders.pay(buyer, entry.id);
+    if (entryPay.wechat) {
+      await stage.wechatPay.simulateSuccess(entryPay.wechat.payNo);
+    }
+    expect(marketNode(stage.db, buyer)).not.toBeNull();
+
+    const mall = await stage.catalog.create({
+      zone: PRODUCT_ZONE_MALL,
+      name: '会员商品F',
+      freightFen: 0,
+      priceFen: 10000,
+      pvFen: 20,
+      stockQuantity: 2,
+      status: 'on',
+    });
+    await credit(stage, buyer, 'consumption', 6000);
+    const created = await stage.orders.create(buyer, {
+      zone: PRODUCT_ZONE_MALL,
+      addressId,
+      items: [{ productId: mall.product.id, quantity: 1 }],
+    });
+    const started = await stage.orders.pay(buyer, created.id);
+    expect(started.order.consumptionFen).toBe(6000);
+    expect(started.order.wechatFen).toBe(4000);
+
+    // 余额被扣走一部分：结算失败，补偿挂起
+    stage.db.walletAccount.update({
+      where: { userId: buyer, walletType: 'consumption' },
+      data: { balanceFen: 2000n },
+    });
+    const paid = await stage.wechatPay.simulateSuccess(started.wechat!.payNo);
+    expect(paid.status).toBe('success');
+    expect(orderRow(stage, created.id).status).toBe('pending_payment');
+    expect((await stage.orders.getForUser(buyer, created.id)).settlementPending).toBe(true);
+
+    // 人工完成结算：扣到空、缺口写备注、订单恢复已支付、补偿关闭
+    const result = await stage.compensations.forceComplete(created.id, 7n);
+    expect(result.view.status).toBe('completed');
+    expect(result.note).toContain('消费金缺口 ¥40.00');
+    expect(orderRow(stage, created.id).status).toBe('paid');
+    expect(orderRow(stage, created.id).remark).toContain('消费金缺口 ¥40.00');
+
+    const balances = await stage.wallet.getBalances(buyer);
+    expect(balances.consumption.balanceFen).toBe(0n);
+    expect(balances.consumption.frozenFen).toBe(0n);
+
+    const restored = await stage.orders.getForUser(buyer, created.id);
+    expect(restored.settlementPending).toBe(false);
+    expect(restored.compensationId).toBeNull();
+    expect(restored.remark).toContain('消费金缺口');
+  });
+
+  it('force-completes a startup order and seats the buyer', async () => {
+    const stage = buildStage2();
+    const rootId = await boot(stage);
+    const buyer = await loginBuyer(stage, 'force-seat', rootId);
+    const addressId = await addressOf(stage, buyer);
+    await credit(stage, buyer, 'points', 1000);
+    const created = await stage.orders.create(buyer, {
+      zone: PRODUCT_ZONE_STARTUP,
+      addressId,
+      items: [{ productId: (await startupProduct(stage, '创业装G', 1)).id, quantity: 2 }],
+    });
+    const started = await stage.orders.pay(buyer, created.id);
+    expect(started.order.pointsFen).toBe(1000);
+
+    // 积分余额被清走：结算失败，补偿挂起，买家还没入座
+    stage.db.walletAccount.update({
+      where: { userId: buyer, walletType: 'points' },
+      data: { balanceFen: 0n },
+    });
+    await stage.wechatPay.simulateSuccess(started.wechat!.payNo);
+    expect(orderRow(stage, created.id).status).toBe('pending_payment');
+    expect(marketNode(stage.db, buyer)).toBeNull();
+
+    const result = await stage.compensations.forceComplete(created.id, 7n);
+    expect(result.view.status).toBe('completed');
+    expect(result.note).toContain('入座完成');
+    expect(orderRow(stage, created.id).status).toBe('paid');
+    expect(marketNode(stage.db, buyer)?.parentUserId).toBe(rootId);
   });
 });

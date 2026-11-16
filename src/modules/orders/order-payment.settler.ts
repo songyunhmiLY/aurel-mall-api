@@ -1,4 +1,4 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, HttpException, Injectable, NotFoundException } from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
 import { PRODUCT_ZONE_STARTUP } from '../catalog/catalog.constants';
 import { WECHAT_PAY_CHANNEL } from '../payments/wechat-pay.constants';
@@ -127,6 +127,91 @@ export class OrderPaymentSettler {
       throw new ConflictException('订单不在待支付状态');
     }
     await this.doFinish(tx, order.id, now, 'wechat');
+  }
+
+  /**
+   * 人工强制完成结算（管理端「手动完成结算」按钮）。
+   * 与 finishForCompensation 的区别：钱包份额不够时不失败，而是扣到空、
+   * 把缺口写进订单备注；入座失败也不阻塞，跳过并写备注。供运营在系统外
+   * 处理完后一键把订单恢复为已支付。
+   * 返回写入订单备注的说明文本。
+   */
+  async forceFinish(tx: Tx, orderId: bigint, now: Date): Promise<string> {
+    const order = await tx.order.findUnique({ where: { id: orderId } });
+    if (!order) {
+      throw new NotFoundException('订单不存在');
+    }
+    if (this.orderAlreadySettled(order.status)) {
+      throw new ConflictException('订单已完成结算');
+    }
+    if (order.status !== ORDER_PENDING_PAYMENT && order.status !== ORDER_CLOSED) {
+      throw new ConflictException('订单不在待支付状态');
+    }
+    const walletNames: Record<string, string> = {
+      consumption: '消费金',
+      points: '积分',
+      withdrawable: '可提现',
+    };
+    const yuan = (fen: bigint): string => `¥${(Number(fen) / 100).toFixed(2)}`;
+    const notes: string[] = [];
+    const held = await tx.walletHold.findFirst({ where: { orderId, status: HOLD_HELD } });
+    const shortfalls = held
+      ? await this.wallet.captureHoldsPartial(tx, orderId, now)
+      : await this.wallet.debitPartial(
+          tx,
+          order.userId,
+          [
+            [WALLET_CONSUMPTION, order.consumptionFen],
+            [WALLET_POINTS, order.pointsFen],
+            [WALLET_WITHDRAWABLE, order.withdrawableFen],
+          ],
+          orderId,
+          now,
+        );
+    for (const { walletType, shortfallFen } of shortfalls) {
+      const name = walletNames[walletType] ?? walletType;
+      notes.push(`${name}缺口 ${yuan(shortfallFen)}，余额已扣至可扣尽的最低值`);
+    }
+    if (shortfalls.length === 0) {
+      notes.push('钱包份额足额扣款');
+    }
+    let seatNote = '';
+    if (order.zone === PRODUCT_ZONE_STARTUP) {
+      try {
+        await this.trees.seat(tx, order.userId, now);
+        notes.push('入座完成');
+      } catch (error) {
+        seatNote =
+          error instanceof HttpException
+            ? error.message
+            : '入座失败';
+        notes.push(`入座未完成：${seatNote}`);
+      }
+    }
+    const remark = `人工完成结算（${now.toISOString()}）：${notes.join('；')}`.slice(0, 255);
+    await tx.order.update({
+      where: { id: order.id },
+      data: { status: ORDER_PAID, paidAt: now, remark, updatedAt: now },
+    });
+    if (order.wechatFen > 0) {
+      // 微信实收在回调时已入账；幂等键保证这里不会重复记。
+      await this.cash.recordInflow(tx, {
+        amountFen: BigInt(order.wechatFen),
+        bizType: CASH_ORDER_WECHAT,
+        bizId: order.id.toString(),
+        occurredAt: now,
+      });
+    }
+    await this.hook.afterOrderPaid({
+      tx,
+      orderId: order.id,
+      userId: order.userId,
+      zone: order.zone,
+      payAmountFen: order.payAmountFen,
+      pvFen: order.pvFen,
+      paidAt: now,
+    });
+    return remark;
   }
 
   private async doFinish(tx: Tx, orderId: bigint, now: Date, paidBy: PaidBy): Promise<void> {

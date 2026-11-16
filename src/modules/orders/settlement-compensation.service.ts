@@ -24,6 +24,7 @@ import {
   classifySettlementError,
 } from './order-payment.settler';
 import {
+  COMPENSATION_ACTIVE_STATUSES,
   COMPENSATION_AUTO_RETRY,
   COMPENSATION_COMPLETED,
   COMPENSATION_MAX_RETRY,
@@ -193,6 +194,39 @@ export class SettlementCompensationService {
       page: input.page,
       pageSize: input.pageSize,
     };
+  }
+
+  /**
+   * 管理端「手动完成结算」：钱包冻结份额不够扣就扣到空、缺口写进订单备注；
+   * 创业专区订单未入座的尝试入座，入座失败也写备注后继续。订单转为已支付，
+   * 补偿记录关闭。供运营在系统外处理完后一键恢复订单。
+   */
+  async forceComplete(
+    orderId: bigint,
+    adminId: bigint | null,
+  ): Promise<{ view: CompensationView; note: string }> {
+    const now = await this.clock.now();
+    const note = await this.prisma.$transaction(async (tx) => {
+      const comp = await tx.settlementCompensation.findFirst({
+        where: { orderId, status: { in: [...COMPENSATION_ACTIVE_STATUSES] } },
+        orderBy: { id: 'desc' },
+      });
+      if (!comp) {
+        throw new NotFoundException('该订单没有待处理的结算补偿');
+      }
+      await tx.$queryRaw`
+        SELECT id FROM settlement_compensations WHERE id = ${comp.id} FOR UPDATE
+      `;
+      const remark = await this.settler.forceFinish(tx, orderId, now);
+      await this.markCompleted(tx, comp.id, adminId, now);
+      return remark;
+    });
+    this.logger.log(`settlement compensation force-complete for order ${orderId}: ${note}`);
+    const comp = await this.prisma.settlementCompensation.findFirst({
+      where: { orderId },
+      orderBy: { id: 'desc' },
+    });
+    return { view: await this.viewOf(comp), note };
   }
 
   /**

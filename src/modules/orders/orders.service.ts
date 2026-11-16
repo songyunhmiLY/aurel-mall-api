@@ -45,6 +45,9 @@ import {
   addFen,
   mulFen,
 } from './order.constants';
+import {
+  COMPENSATION_ACTIVE_STATUSES,
+} from './settlement-compensation.constants';
 import { splitMall, splitStartup } from './payment-split';
 
 type Tx = Prisma.TransactionClient;
@@ -107,6 +110,15 @@ export interface OrderView {
   placedAt: string;
   /** 待支付订单的自动关闭时刻。null 表示不限时（ORDER_PAYMENT_TIMEOUT_MINUTES=0）或订单已不在待支付。 */
   payDeadline: string | null;
+  /**
+   * 微信已支付但结算未完成：存在活跃的结算补偿记录（自动重试或待人工）。
+   * 界面据此显示黄色异常标记；结算完成后自动消失，无需人工清除。
+   */
+  settlementPending: boolean;
+  /** 活跃结算补偿的 id；settlementPending 为 false 时为 null。管理端用它直接发起继续结算。 */
+  compensationId: string | null;
+  /** 运营备注。人工强制完成结算时由系统写入缺口与入座处理说明；用户端不展示。 */
+  remark: string | null;
   paidAt: string | null;
   shippedAt: string | null;
   closedAt: string | null;
@@ -485,6 +497,10 @@ export class OrdersService {
       where: { orderId: order.id },
       orderBy: { id: 'asc' },
     });
+    const pendingCompensation = await this.prisma.settlementCompensation.findFirst({
+      where: { orderId: order.id, status: { in: [...COMPENSATION_ACTIVE_STATUSES] } },
+      orderBy: { id: 'desc' },
+    });
     return {
       id: order.id,
       orderNo: order.orderNo,
@@ -511,6 +527,9 @@ export class OrdersService {
       trackingNumber: order.trackingNo,
       items: rows.map(toItemView),
       placedAt: order.placedAt.toISOString(),
+      settlementPending: pendingCompensation != null,
+      compensationId: pendingCompensation ? pendingCompensation.id.toString() : null,
+      remark: order.remark,
       payDeadline: this.payDeadlineOf(order),
       paidAt: order.paidAt ? order.paidAt.toISOString() : null,
       shippedAt: order.shippedAt ? order.shippedAt.toISOString() : null,
