@@ -208,7 +208,7 @@ describe('notification settings', () => {
       BadRequestException,
     );
     await expect(
-      service.update({ events: [{ event: 'order_shipped', enabled: true }] }, 3n),
+      service.update({ events: [{ event: 'order_refunded', enabled: true }] }, 3n),
     ).rejects.toBeInstanceOf(BadRequestException);
     await expect(
       service.update(
@@ -523,6 +523,76 @@ describe('notification delivery', () => {
         time2: '2026-11-13 10:00',
         character_string3: 'SO15',
       },
+    });
+  });
+
+  it('fills the order paid and shipped slots from the order itself', async () => {
+    const config = runtime({
+      deliveryMode: 'wechat',
+      events: {
+        order_paid: {
+          enabled: true,
+          wechatTemplateId: 'wx-paid',
+          pagePath: 'pages/order/detail?id=15',
+          slots: [
+            { channel: 'wechat', slot: 'character_string1', field: 'orderNo' },
+            { channel: 'wechat', slot: 'amount2', field: 'amount' },
+            { channel: 'wechat', slot: 'thing3', field: 'goodsName' },
+            { channel: 'wechat', slot: 'time4', field: 'time' },
+          ],
+        },
+        order_shipped: {
+          enabled: true,
+          wechatTemplateId: 'wx-ship',
+          slots: [
+            { channel: 'wechat', slot: 'character_string1', field: 'orderNo' },
+            { channel: 'wechat', slot: 'thing2', field: 'courierName' },
+            { channel: 'wechat', slot: 'character_string3', field: 'trackingNo' },
+            { channel: 'wechat', slot: 'time4', field: 'time' },
+          ],
+        },
+      },
+    });
+    const { dispatch, wechat, sms, directory } = harness(config);
+    await dispatch.deliver(
+      [
+        {
+          type: 'order_paid',
+          userId: 7n,
+          orderNo: 'SO15',
+          amountFen: 123_450n,
+          goodsName: '创业专区礼包 等 2 件',
+          occurredAt: NOW,
+        },
+        {
+          type: 'order_shipped',
+          userId: 7n,
+          orderNo: 'SO15',
+          courierName: '顺丰',
+          trackingNo: 'SF123',
+          occurredAt: NOW,
+        },
+      ],
+      directory,
+      wechat,
+      sms,
+    );
+    expect(sms.sends).toEqual([]);
+    const paid = wechat.sends.find((send) => send.templateId === 'wx-paid');
+    const shipped = wechat.sends.find((send) => send.templateId === 'wx-ship');
+    expect(paid?.page).toBe('pages/order/detail?id=15');
+    expect(paid?.data).toEqual({
+      character_string1: 'SO15',
+      amount2: '1234.50',
+      thing3: '创业专区礼包 等 2 件',
+      time4: '2026-11-13 10:00',
+    });
+    expect(shipped?.page).toBe('pages/mine/index');
+    expect(shipped?.data).toEqual({
+      character_string1: 'SO15',
+      thing2: '顺丰',
+      character_string3: 'SF123',
+      time4: '2026-11-13 10:00',
     });
   });
 

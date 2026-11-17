@@ -28,6 +28,22 @@ export function orderIdFromBiz(bizId: string): bigint | null {
 export function slotValues(intent: NotifyIntent, orderNo: string): Record<string, string> {
   const time = formatShanghaiMinute(intent.occurredAt);
   switch (intent.type) {
+    case 'order_paid':
+      return {
+        orderNo: intent.orderNo,
+        amount: formatYuan(intent.amountFen),
+        goodsName: intent.goodsName,
+        time,
+        status: 'paid',
+      };
+    case 'order_shipped':
+      return {
+        orderNo: intent.orderNo,
+        courierName: intent.courierName,
+        trackingNo: intent.trackingNo,
+        time,
+        status: 'shipped',
+      };
     case 'refund_result':
       return {
         amount: formatYuan(intent.amountFen),

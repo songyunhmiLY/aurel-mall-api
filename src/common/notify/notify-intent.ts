@@ -1,8 +1,11 @@
 /**
- * §16 只推送这六类事件。全局推送方式不在这里，它对全部已开启事件一起生效。
+ * §16 只推送这些事件。全局推送方式不在这里，它对全部已开启事件一起生效。
  * 钱包入账按账户拆开。幸运返还和商城退款有自己的事件，不再各发一条钱包入账。
+ * 订单支付与发货没有钱包流水，单独两个事件，只在订单状态真正变化时发一次。
  */
 export const NOTIFY_EVENTS = [
+  'order_paid',
+  'order_shipped',
   'refund_result',
   'lucky_return_credited',
   'withdrawal_outcome',
@@ -14,6 +17,8 @@ export const NOTIFY_EVENTS = [
 export type NotifyEvent = (typeof NOTIFY_EVENTS)[number];
 
 export const NOTIFY_EVENT_FIELDS = {
+  order_paid: ['orderNo', 'amount', 'goodsName', 'time', 'status'],
+  order_shipped: ['orderNo', 'courierName', 'trackingNo', 'time', 'status'],
   refund_result: ['amount', 'time', 'orderNo', 'status'],
   lucky_return_credited: ['amount', 'pointsAmount', 'withdrawableAmount', 'time', 'orderNo'],
   withdrawal_outcome: ['amount', 'payoutAmount', 'time', 'orderNo', 'status'],
@@ -40,6 +45,23 @@ export function walletCreditNotifies(bizType: string): boolean {
 }
 
 export type NotifyIntent =
+  | {
+      type: 'order_paid';
+      userId: bigint;
+      orderNo: string;
+      amountFen: bigint;
+      /** 已截断的商品名，超过一个商品时带「等 N 件」。直接填模板空位用。 */
+      goodsName: string;
+      occurredAt: Date;
+    }
+  | {
+      type: 'order_shipped';
+      userId: bigint;
+      orderNo: string;
+      courierName: string;
+      trackingNo: string;
+      occurredAt: Date;
+    }
   | {
       type: 'refund_result';
       userId: bigint;
@@ -77,6 +99,10 @@ export type NotifyIntent =
 
 export function eventOf(intent: NotifyIntent): NotifyEvent {
   switch (intent.type) {
+    case 'order_paid':
+      return 'order_paid';
+    case 'order_shipped':
+      return 'order_shipped';
     case 'refund_result':
       return 'refund_result';
     case 'lucky_return_credited':

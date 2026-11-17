@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
+import { enqueueNotify } from '../../common/notify/notify-buffer';
 import { PRODUCT_ZONE_STARTUP } from '../catalog/catalog.constants';
 import { CofounderDividendService } from '../cofounder/cofounder-dividend.service';
 import { MESSAGE_CATEGORY_ORDER } from '../messages/message.constants';
@@ -52,6 +53,7 @@ export class PaymentSettlementService {
       },
       event.paidAt,
     );
+    await this.notifyPaid(event, order.orderNo);
     if (order.zone === PRODUCT_ZONE_STARTUP) {
       await this.filing.onStartupPaid(
         event.tx,
@@ -104,4 +106,39 @@ export class PaymentSettlementService {
       event.paidAt,
     );
   }
+
+  /**
+   * 订单支付成功的订阅消息。只在事务里入队，提交后才发。
+   * 商品名取第一件，多件时带总件数，模板空位放得下。
+   */
+  private async notifyPaid(
+    event: { tx: Tx; orderId: bigint; userId: bigint; payAmountFen: number; paidAt: Date },
+    orderNo: string,
+  ): Promise<void> {
+    const items = await event.tx.orderItem.findMany({
+      where: { orderId: event.orderId },
+      orderBy: { id: 'asc' },
+    });
+    let totalQuantity = 0;
+    for (const item of items) {
+      totalQuantity += item.quantity;
+    }
+    enqueueNotify({
+      type: 'order_paid',
+      userId: event.userId,
+      orderNo,
+      amountFen: BigInt(event.payAmountFen),
+      goodsName: goodsNameText(items[0]?.productName ?? '', totalQuantity),
+      occurredAt: event.paidAt,
+    });
+  }
+}
+
+/** 微信模板的商品名称空位一般只有 20 个字，超了截断并加省略号。 */
+const GOODS_NAME_MAX = 20;
+
+function goodsNameText(firstName: string, totalQuantity: number): string {
+  const name = firstName || '订单商品';
+  const text = totalQuantity > 1 ? `${name} 等 ${totalQuantity} 件` : name;
+  return text.length > GOODS_NAME_MAX ? `${text.slice(0, GOODS_NAME_MAX - 1)}…` : text;
 }

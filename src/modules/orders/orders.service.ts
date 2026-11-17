@@ -12,6 +12,7 @@ import { randomBytes } from 'node:crypto';
 import type { Order, OrderItem, Prisma, Product, ProductSku } from '@prisma/client';
 import { USER_STATUS_ACTIVE } from '../../common/auth/user-status';
 import { ClockService } from '../../common/clock/clock.service';
+import { enqueueNotify } from '../../common/notify/notify-buffer';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import type { AppEnv } from '../../config/app-env';
 import type { LockedRuntimeConfig } from '../../config/locked-runtime';
@@ -47,9 +48,7 @@ import {
   addFen,
   mulFen,
 } from './order.constants';
-import {
-  COMPENSATION_ACTIVE_STATUSES,
-} from './settlement-compensation.constants';
+import { COMPENSATION_ACTIVE_STATUSES } from './settlement-compensation.constants';
 import { splitMall, splitStartup } from './payment-split';
 
 type Tx = Prisma.TransactionClient;
@@ -380,6 +379,14 @@ export class OrdersService {
         },
         now,
       );
+      enqueueNotify({
+        type: 'order_shipped',
+        userId: order.userId,
+        orderNo: order.orderNo,
+        courierName,
+        trackingNo: trackingNumber,
+        occurredAt: now,
+      });
     });
     return this.getAdmin(orderId);
   }
