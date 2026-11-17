@@ -2,6 +2,8 @@ import { Injectable } from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
 import { PRODUCT_ZONE_STARTUP } from '../catalog/catalog.constants';
 import { CofounderDividendService } from '../cofounder/cofounder-dividend.service';
+import { MESSAGE_CATEGORY_ORDER } from '../messages/message.constants';
+import { MessagesService, orderMessageLink, yuanText } from '../messages/messages.service';
 import { OpsTeamDividendService } from '../ops-team/ops-team-dividend.service';
 import { StudioSubsidyService } from '../studio/studio-subsidy.service';
 import { AwardService } from './award.service';
@@ -21,6 +23,7 @@ export class PaymentSettlementService {
     private readonly cofounders: CofounderDividendService,
     private readonly studios: StudioSubsidyService,
     private readonly opsTeam: OpsTeamDividendService,
+    private readonly messages: MessagesService,
   ) {}
 
   async afterOrderPaid(event: {
@@ -36,6 +39,19 @@ export class PaymentSettlementService {
     if (!order) {
       return;
     }
+    await this.messages.record(
+      event.tx,
+      {
+        userId: order.userId,
+        category: MESSAGE_CATEGORY_ORDER,
+        title: '支付成功',
+        body: `订单 ${order.orderNo} 已支付成功，实付 ${yuanText(event.payAmountFen)}。`,
+        linkPage: orderMessageLink(order.id),
+        bizType: 'order',
+        bizId: order.id.toString(),
+      },
+      event.paidAt,
+    );
     if (order.zone === PRODUCT_ZONE_STARTUP) {
       await this.filing.onStartupPaid(
         event.tx,

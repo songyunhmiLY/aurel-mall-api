@@ -24,6 +24,8 @@ import {
 } from '../catalog/catalog.constants';
 import { WECHAT_PAY_CHANNEL } from '../payments/wechat-pay.constants';
 import { WechatPayService, type WechatPrepayView } from '../payments/wechat-pay.service';
+import { MESSAGE_CATEGORY_ORDER } from '../messages/message.constants';
+import { MessagesService, orderMessageLink } from '../messages/messages.service';
 import { TreesService } from '../rewards/trees/trees.service';
 import {
   HOLD_HELD,
@@ -167,6 +169,7 @@ export class OrdersService {
     private readonly wechat: WechatPayService,
     @Inject(LOCKED_RUNTIME_CONFIG) private readonly locked: LockedRuntimeConfig,
     @Inject(APP_ENV) private readonly env: AppEnv,
+    private readonly messages: MessagesService,
   ) {}
 
   async create(userId: bigint, input: CreateOrderInput): Promise<OrderView> {
@@ -179,7 +182,7 @@ export class OrdersService {
         throw new UnauthorizedException('登录已失效');
       }
       if (zone === PRODUCT_ZONE_MALL && !user.member) {
-        throw new ForbiddenException('非会员不能购买会员商城');
+        throw new ForbiddenException('该产品只有会员才能下单');
       }
       if (zone === PRODUCT_ZONE_STARTUP && !user.seated) {
         await this.trees.assertCanSeat(tx, userId);
@@ -364,6 +367,19 @@ export class OrdersService {
           updatedAt: now,
         },
       });
+      await this.messages.record(
+        tx,
+        {
+          userId: order.userId,
+          category: MESSAGE_CATEGORY_ORDER,
+          title: '订单已发货',
+          body: `订单 ${order.orderNo} 已发货，${courierName}，运单号 ${trackingNumber}。`,
+          linkPage: orderMessageLink(order.id),
+          bizType: 'order',
+          bizId: order.id.toString(),
+        },
+        now,
+      );
     });
     return this.getAdmin(orderId);
   }

@@ -6,6 +6,7 @@ import {
   PendingSettlementHook,
   type OrderPaidEvent,
 } from '../../src/modules/orders/order-paid.hook';
+import { MessagesService } from '../../src/modules/messages/messages.service';
 import { OrdersService } from '../../src/modules/orders/orders.service';
 import { SettlementCompensationService } from '../../src/modules/orders/settlement-compensation.service';
 import type { WechatPayGateway } from '../../src/modules/payments/wechat-pay.gateway';
@@ -70,7 +71,18 @@ export function buildStage2(unitPriceFen = 1000) {
     undefined,
     cash,
   );
-  const orders = new OrdersService(prisma, clock, wallet, trees, settlement, wechatPay, env.locked, env);
+  const messages = new MessagesService(prisma, clock);
+  const orders = new OrdersService(
+    prisma,
+    clock,
+    wallet,
+    trees,
+    settlement,
+    wechatPay,
+    env.locked,
+    env,
+    messages,
+  );
   const compensations = new SettlementCompensationService(
     prisma,
     clock,

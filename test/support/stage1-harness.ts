@@ -129,7 +129,7 @@ export function buildStage1(env: AppEnv = stage1Env()) {
   );
   const kyc = new KycService(prisma, clock as unknown as ClockService);
   const addresses = new AddressesService(prisma, clock as unknown as ClockService);
-  const catalog = new CatalogService(prisma, clock as unknown as ClockService, users, env.locked);
+  const catalog = new CatalogService(prisma, clock as unknown as ClockService, env.locked);
   const adminUsers = new AdminUsersService(prisma, clock as unknown as ClockService, kyc);
   return { db, clock, env, tokens, wechat, users, kyc, addresses, catalog, adminUsers };
 }

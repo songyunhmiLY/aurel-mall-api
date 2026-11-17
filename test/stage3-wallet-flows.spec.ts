@@ -19,6 +19,7 @@ import { CashLedgerService } from '../src/modules/wallet/cash-ledger.service';
 import { DisplayNameService } from '../src/modules/wallet/display-name.service';
 import { PaymentPasswordService } from '../src/modules/wallet/payment-password.service';
 import { TransferService } from '../src/modules/wallet/transfer.service';
+import { MessagesService } from '../src/modules/messages/messages.service';
 import { WithdrawalService } from '../src/modules/wallet/withdrawal.service';
 import {
   addressOf,
@@ -49,7 +50,14 @@ function wire(stage: Stage2) {
   const banks = new BankAccountService(prisma, clock);
   const transfers = new TransferService(prisma, clock, stage.wallet, passwords);
   const cash = new CashLedgerService();
-  const withdrawals = new WithdrawalService(prisma, clock, stage.wallet, stage.kyc, cash);
+  const withdrawals = new WithdrawalService(
+    prisma,
+    clock,
+    stage.wallet,
+    stage.kyc,
+    cash,
+    new MessagesService(prisma, clock),
+  );
   const names = new DisplayNameService(prisma, clock, stage.wallet);
   const refunds = new RefundsService(
     prisma,

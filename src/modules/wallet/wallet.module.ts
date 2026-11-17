@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { AuthModule } from '../../common/auth/auth.module';
 import { ClockModule } from '../../common/clock/clock.module';
+import { MessagesModule } from '../messages/messages.module';
 import { UsersModule } from '../users/users.module';
 import { BankAccountController } from './bank-account.controller';
 import { BankAccountService } from './bank-account.service';
@@ -20,7 +21,7 @@ import { WithdrawalController } from './withdrawal.controller';
 import { WithdrawalService } from './withdrawal.service';
 
 @Module({
-  imports: [AuthModule, ClockModule, UsersModule],
+  imports: [AuthModule, ClockModule, UsersModule, MessagesModule],
   controllers: [
     WalletController,
     PaymentPasswordController,

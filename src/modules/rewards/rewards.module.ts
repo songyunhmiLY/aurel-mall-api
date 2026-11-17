@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { CofounderModule } from '../cofounder/cofounder.module';
+import { MessagesModule } from '../messages/messages.module';
 import { OpsTeamModule } from '../ops-team/ops-team.module';
 import { StudioModule } from '../studio/studio.module';
 import { AwardAdminModule } from './admin/award-admin.module';
@@ -29,6 +30,7 @@ import { TreesModule } from './trees/trees.module';
     CofounderModule,
     StudioModule,
     OpsTeamModule,
+    MessagesModule,
   ],
   providers: [RewardsService, AwardService, PaymentSettlementService],
   exports: [

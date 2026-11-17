@@ -1,6 +1,5 @@
 import {
   BadRequestException,
-  ForbiddenException,
   Inject,
   Injectable,
   InternalServerErrorException,
@@ -12,7 +11,6 @@ import { ClockService } from '../../common/clock/clock.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import type { LockedRuntimeConfig } from '../../config/locked-runtime';
 import { LOCKED_RUNTIME_CONFIG } from '../../config/tokens';
-import { UsersService } from '../users/users.service';
 import {
   PRODUCT_STATUS_DRAFT,
   PRODUCT_STATUS_OFF,
@@ -131,44 +129,41 @@ interface ResolvedCommerce {
 
 /**
  * 每个商品恰好一个 SKU。用户接口只返回上架商品。
- * 会员商城还要求用户行上的会员标记。库存由订单在支付成功时扣减。
+ * 创业专区与会员商城在同一个商城里展示：注册用户都能浏览全部商品，
+ * 会员限制只在下单时校验（见 OrdersService.create）。
  */
 @Injectable()
 export class CatalogService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly clock: ClockService,
-    private readonly users: UsersService,
     @Inject(LOCKED_RUNTIME_CONFIG) private readonly locked: LockedRuntimeConfig,
   ) {}
 
-  async listPublic(
-    userId: bigint,
-    query: { zone: string; categoryId?: bigint; page: number; pageSize: number },
-  ): Promise<PageResult<PublicProductView>> {
-    const zone = parseZone(query.zone);
-    if (zone === PRODUCT_ZONE_MALL) {
-      await this.assertMember(userId);
-    } else if (query.categoryId !== undefined) {
+  async listPublic(query: {
+    zone?: string;
+    categoryId?: bigint;
+    page: number;
+    pageSize: number;
+  }): Promise<PageResult<PublicProductView>> {
+    const zone = parseOptionalZone(query.zone);
+    if (zone === PRODUCT_ZONE_STARTUP && query.categoryId !== undefined) {
       throw new BadRequestException('创业专区没有分类');
     }
     if (query.categoryId !== undefined) {
       await this.requireCategory(query.categoryId);
     }
     const where: Prisma.ProductWhereInput = {
-      zone,
       status: PRODUCT_STATUS_ON,
+      ...(zone === undefined ? {} : { zone }),
       ...(query.categoryId !== undefined ? { categoryId: query.categoryId } : {}),
     };
     const page = await this.pageProducts(where, query.page, query.pageSize);
     return { ...page, items: page.items.map(toPublic) };
   }
 
-  async getPublic(userId: bigint, id: bigint): Promise<PublicProductView> {
+  async getPublic(id: bigint): Promise<PublicProductView> {
     const product = await this.requireProduct(id);
-    if (product.zone === PRODUCT_ZONE_MALL) {
-      await this.assertMember(userId);
-    }
     if (product.status !== PRODUCT_STATUS_ON) {
       throw new NotFoundException('商品不存在');
     }
@@ -563,12 +558,6 @@ export class CatalogService {
     }
     return product;
   }
-
-  private async assertMember(userId: bigint): Promise<void> {
-    if (!(await this.users.isMember(userId))) {
-      throw new ForbiddenException('非会员不能浏览会员商城');
-    }
-  }
 }
 
 function parseZone(zone: string): string {
@@ -576,6 +565,14 @@ function parseZone(zone: string): string {
     throw new BadRequestException('专区不正确');
   }
   return zone;
+}
+
+/** 不传、空串或 all 表示创业专区与会员商城混排。 */
+function parseOptionalZone(zone: string | undefined): string | undefined {
+  if (zone === undefined || zone === '' || zone === 'all') {
+    return undefined;
+  }
+  return parseZone(zone);
 }
 
 /** 成本价可空；给值时必须是不小于 0 的整数（分）。 */

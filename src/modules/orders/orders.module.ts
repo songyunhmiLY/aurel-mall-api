@@ -1,6 +1,7 @@
 import { Module, forwardRef } from '@nestjs/common';
 import { AuthModule } from '../../common/auth/auth.module';
 import { ClockModule } from '../../common/clock/clock.module';
+import { MessagesModule } from '../messages/messages.module';
 import { PaymentsModule } from '../payments/payments.module';
 import { RewardsModule } from '../rewards/rewards.module';
 import { TreesModule } from '../rewards/trees/trees.module';
@@ -22,6 +23,7 @@ import { SettlementCompensationService } from './settlement-compensation.service
   imports: [
     AuthModule,
     ClockModule,
+    MessagesModule,
     WalletModule,
     TreesModule,
     RewardsModule,

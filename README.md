@@ -249,7 +249,7 @@ docs/er.md                # 逻辑 ER 图
 
 进程启动时，如果还没有官方根账户，就创建一次。它自动是会员，同时是邀请树和市场树的根，邀请码是 `000000`，不需要下单，也不走填写邀请码。若库里还留着旧码 `ROOT`，启动时改成 `000000`。不会用这种方式创建其他会员。其他用户只有显式填写邀请码之后，才有邀请上级；创业专区支付成功后再入座。
 
-有市场席位才是会员。这个标记同时写在用户行的 `member` 和 `seated` 上，两者一起更新。根账户启动时就是会员。非会员可以浏览创业专区，调用会员商城列表或详情时返回 403，文案为「非会员不能浏览会员商城」。
+有市场席位才是会员。这个标记同时写在用户行的 `member` 和 `seated` 上，两者一起更新。根账户启动时就是会员。创业专区与会员商城在同一个商城里展示，注册用户都能浏览全部商品；会员限制只在下单时校验。
 
 停用只把 `users.status` 改成 `disabled`，因此不能登录。不取消会员，也不删除市场席位。`member` 和 `seated` 保持不变。
 
@@ -290,10 +290,10 @@ docs/er.md                # 逻辑 ER 图
 
 用户接口需要登录：
 
-- `GET /api/v1/catalog/products?zone=startup|mall&categoryId=&page=&pageSize=`
+- `GET /api/v1/catalog/products?zone=startup|mall|all&categoryId=&page=&pageSize=`
 - `GET /api/v1/catalog/products/:id`
 
-返回 `id`、`zone`、`name`、`subtitle`、`body`、`coverUrl`、`imageUrls`、`freightFen`、`priceFen`、`stockQuantity`、`category`。只有商城带 `pvFen`。未上架或不存在是 404。`categoryId` 只对商城列表生效。
+返回 `id`、`zone`、`name`、`subtitle`、`body`、`coverUrl`、`imageUrls`、`freightFen`、`priceFen`、`stockQuantity`、`category`。只有商城带 `pvFen`。未上架或不存在是 404。`zone` 不传或传 `all` 时两个专区混排返回，这是小程序商城的默认列表；传 `startup` 或 `mall` 只看一个专区。`categoryId` 只对商城列表生效，混排时按分类筛会自然排除没有分类的创业专区商品。
 
 管理端需要管理员令牌：
 
@@ -543,7 +543,7 @@ T **不是**锁定项。单位是分，比较的是市场里创业专区已支�
 
 创业专区每件商品的单价是锁定单价 N。应付里的商品金额是 N 的整数倍。运费按商品上的 `freightFen` 另加，不另做地区运费。创业专区订单不能退款。会员商城订单可以申请退款，见上面的商城退款。
 
-会员商城只有会员能下单。非会员返回 403，文案为「非会员不能购买会员商城」。
+会员商城只有会员能下单。非会员返回 403，文案为「该产品只有会员才能下单」。创业专区商品注册用户即可下单。
 
 库存不参与任何判断：`sku_stocks.quantity` 只作为留档字段保存，下单、支付、结算都不读它，也不会扣减。商品上架即可下单，数量不受库存限制。
 
@@ -891,7 +891,42 @@ BullMQ 队列 `due-jobs` 大约每 30 秒触发一次，进程启动时也会跑
 
 `templates` 按上面的事件顺序，只包含同时满足这三项的事件：事件开关已开、全局 `deliveryMode` 是 `wechat` 或 `both`、微信模板 ID 非空。`deliveryMode` 为 `sms`、空或尚未设置时返回 `"templates": []`，不是错误。事件关闭，或没有微信模板 ID，也不出现在列表里。`page` 未配置时是 `pages/mine/index`，与发送时相同。响应里没有短信密钥、SecretId、短信模板或其他管理端配置。
 
-没有会员端的消息列表或已读接口。
+### 站内消息
+
+站内消息与订阅消息是两套东西：订阅消息由微信发出，站内消息存在 `user_messages`，在小程序「我的 → 系统通知」里看。业务事件发生时写一条，与业务同事务提交。目前只写这些事件：支付成功、订单发货、超时关单、提现打款、提现驳回、幸运返还到账。
+
+未读口径只有一个：消息时间晚于 `users.messages_read_at` 即为未读。用户打开消息列表并把首页数据拉出来后，小程序调 `POST /messages/read` 把这个时间推到当前，红点立即消失；本次列表仍按读到的 `read` 字段显示哪几条是新的。
+
+都需要小程序登录令牌，不检查是否会员。
+
+- `GET /api/v1/messages?category=&page=&pageSize=`。`category` 可选 `order`（交易）或 `wallet`（资金），不传或传未知值返回全部。
+- `GET /api/v1/messages/unread`。只返回未读数，供小程序启动时决定是否显示红点。
+- `POST /api/v1/messages/read`。把上次查看时间推到当前，返回 `{ "readAt", "unreadCount": 0 }`。
+- `GET /api/v1/messages/:id`。单条详情，只能读自己的消息，别人的返回「消息不存在」。
+
+列表响应：
+
+```json
+{
+  "items": [
+    {
+      "id": "12",
+      "category": "order",
+      "title": "订单已发货",
+      "body": "订单 SO20261117001 已发货，顺丰，运单号 SF123456。",
+      "linkPage": "/pages/order/detail?id=8",
+      "read": false,
+      "createdAt": "2026-11-17T10:20:00.000Z"
+    }
+  ],
+  "total": 1,
+  "page": 1,
+  "pageSize": 20,
+  "unreadCount": 1
+}
+```
+
+`linkPage` 为空表示这条消息只展示正文。分类筛选项与展示文案由小程序决定，服务端只认 `order` 与 `wallet`。
 
 ## 微信支付
 

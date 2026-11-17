@@ -4,6 +4,8 @@ import { PrismaService } from '../../common/prisma/prisma.service';
 import type { AppEnv } from '../../config/app-env';
 import { APP_ENV } from '../../config/tokens';
 import { WECHAT_PAY_CHANNEL } from '../payments/wechat-pay.constants';
+import { MESSAGE_CATEGORY_ORDER } from '../messages/message.constants';
+import { MessagesService, orderMessageLink } from '../messages/messages.service';
 import { WalletService } from '../wallet/wallet.service';
 import { ORDER_CLOSED, ORDER_PENDING_PAYMENT } from './order.constants';
 
@@ -33,6 +35,7 @@ export class OrderTimeoutService {
     private readonly clock: ClockService,
     private readonly wallet: WalletService,
     @Inject(APP_ENV) private readonly env: AppEnv,
+    private readonly messages: MessagesService,
   ) {}
 
   /** 定时任务入口。返回本次实际关闭的订单数。时长为 0 时不做任何事。 */
@@ -102,6 +105,19 @@ export class OrderTimeoutService {
         where: { id: orderId },
         data: { status: ORDER_CLOSED, closedAt: now, updatedAt: now },
       });
+      await this.messages.record(
+        tx,
+        {
+          userId: order.userId,
+          category: MESSAGE_CATEGORY_ORDER,
+          title: '订单已关闭',
+          body: `订单 ${order.orderNo} 超时未支付，已自动关闭，账户冻结份额已释放。`,
+          linkPage: orderMessageLink(order.id),
+          bizType: 'order',
+          bizId: order.id.toString(),
+        },
+        now,
+      );
       return true;
     });
   }

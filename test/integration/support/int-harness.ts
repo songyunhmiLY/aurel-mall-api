@@ -27,6 +27,7 @@ import {
   PRODUCT_ZONE_STARTUP,
 } from '../../../src/modules/catalog/catalog.constants';
 import { OrderPaymentSettler } from '../../../src/modules/orders/order-payment.settler';
+import { MessagesService } from '../../../src/modules/messages/messages.service';
 import { OrdersService } from '../../../src/modules/orders/orders.service';
 import { PaymentSettlementHook } from '../../../src/modules/orders/payment-settlement.hook';
 import { SettlementCompensationService } from '../../../src/modules/orders/settlement-compensation.service';
@@ -124,13 +125,14 @@ export function buildIntHarness(databaseUrl: string) {
   const kyc = new KycService(prisma, clock);
   const addresses = new AddressesService(prisma, clock);
   const banks = new BankAccountService(prisma, clock);
-  const catalog = new CatalogService(prisma, clock, users, env.locked);
+  const catalog = new CatalogService(prisma, clock, env.locked);
   const adminUsers = new AdminUsersService(prisma, clock, kyc);
 
   const wallet = new WalletService(prisma, clock);
   const trees = new TreesService();
   const credits = new AwardCreditService(wallet);
-  const filing = new FilingService(prisma, clock, env.locked, credits);
+  const messages = new MessagesService(prisma, clock);
+  const filing = new FilingService(prisma, clock, env.locked, credits, messages);
   const awards = new AwardService(env.locked, credits);
   const cofounderPool = new CofounderPoolService(prisma);
   const cofounderSettings = new CofounderSettingsService(prisma, clock);
@@ -151,6 +153,7 @@ export function buildIntHarness(databaseUrl: string) {
     cofounderDividend,
     studioSubsidy,
     opsTeamDividend,
+    messages,
   );
   const hook = new PaymentSettlementHook(paid);
   const cash = new CashLedgerService();
@@ -184,7 +187,17 @@ export function buildIntHarness(databaseUrl: string) {
     undefined,
     cash,
   );
-  const orders = new OrdersService(prisma, clock, wallet, trees, settlement, wechatPay, env.locked, env);
+  const orders = new OrdersService(
+    prisma,
+    clock,
+    wallet,
+    trees,
+    settlement,
+    wechatPay,
+    env.locked,
+    env,
+    messages,
+  );
   const compensations = new SettlementCompensationService(
     prisma,
     clock,
@@ -200,6 +213,7 @@ export function buildIntHarness(databaseUrl: string) {
     wallet,
     kyc,
     cash,
+    messages,
   );
   const refunds = new RefundsService(
     prisma,

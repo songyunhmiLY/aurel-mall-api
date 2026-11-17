@@ -1,4 +1,4 @@
-import { ForbiddenException, NotFoundException } from '@nestjs/common';
+import { NotFoundException } from '@nestjs/common';
 import {
   PRODUCT_ZONE_MALL,
   PRODUCT_ZONE_STARTUP,
@@ -10,12 +10,8 @@ import { Stage1Db } from './support/stage1-db';
 import { UNIT_PRICE_FEN, buildStage1 } from './support/stage1-harness';
 
 describe('catalog visibility, startup price, and admin users', () => {
-  it('hides the member mall from non-members and shows it to the root member', async () => {
-    const { db, users, wechat, catalog } = buildStage1();
-    await users.onModuleInit();
-    const rootId = rootUserId(db);
-    wechat.logins.set('code-a', { openid: 'openid-a', unionid: null });
-    const buyer = await users.loginWithMiniProgram('code-a');
+  it('lists both zones in one mall for every signed-in user', async () => {
+    const { catalog } = buildStage1();
 
     const mall = await catalog.create({
       zone: PRODUCT_ZONE_MALL,
@@ -32,14 +28,8 @@ describe('catalog visibility, startup price, and admin users', () => {
     expect(mall.warnings).toEqual([]);
     expect(mall.product.pvFen).toBe(1_000);
 
-    await expect(
-      catalog.listPublic(buyer.user.id, { zone: PRODUCT_ZONE_MALL, page: 1, pageSize: 20 }),
-    ).rejects.toThrow('非会员不能浏览会员商城');
-    await expect(catalog.getPublic(buyer.user.id, mall.product.id)).rejects.toBeInstanceOf(
-      ForbiddenException,
-    );
-
-    const visible = await catalog.listPublic(rootId, {
+    // 非会员也能浏览会员商城：会员限制只在下单时校验。
+    const visible = await catalog.listPublic({
       zone: PRODUCT_ZONE_MALL,
       page: 1,
       pageSize: 20,
@@ -47,6 +37,7 @@ describe('catalog visibility, startup price, and admin users', () => {
     expect(visible.items).toHaveLength(1);
     expect(visible.items[0]).toMatchObject({
       id: mall.product.id,
+      zone: PRODUCT_ZONE_MALL,
       priceFen: 2_000,
       pvFen: 1_000,
       freightFen: 800,
@@ -54,7 +45,7 @@ describe('catalog visibility, startup price, and admin users', () => {
       coverUrl: 'https://cdn.example.com/cover.png',
       imageUrls: ['https://cdn.example.com/extra.png'],
     });
-    const detail = await catalog.getPublic(rootId, mall.product.id);
+    const detail = await catalog.getPublic(mall.product.id);
     expect(detail.pvFen).toBe(1_000);
 
     const startup = await catalog.create({
@@ -64,13 +55,21 @@ describe('catalog visibility, startup price, and admin users', () => {
       stockQuantity: 2,
       status: 'on',
     });
-    const startupList = await catalog.listPublic(buyer.user.id, {
+    const startupList = await catalog.listPublic({
       zone: PRODUCT_ZONE_STARTUP,
       page: 1,
       pageSize: 20,
     });
     expect(startupList.items.map((item) => item.id)).toEqual([startup.product.id]);
+    expect(startupList.items[0]).toMatchObject({ zone: PRODUCT_ZONE_STARTUP, priceFen: UNIT_PRICE_FEN });
     expect(startupList.items[0]).not.toHaveProperty('pvFen');
+
+    // 不传 zone 与 zone=all 都是同一个混排商城，两个专区的商品都在里面。
+    const mixed = await catalog.listPublic({ page: 1, pageSize: 20 });
+    expect(mixed.items.map((item) => item.id)).toEqual([startup.product.id, mall.product.id]);
+    const mixedAll = await catalog.listPublic({ zone: 'all', page: 1, pageSize: 20 });
+    expect(mixedAll.items.map((item) => item.id)).toEqual(mixed.items.map((item) => item.id));
+    expect(mixed.total).toBe(2);
   });
 
   it('forces startup price to N and warns when mall PV exceeds price', async () => {
@@ -124,9 +123,7 @@ describe('catalog visibility, startup price, and admin users', () => {
   });
 
   it('shows a product to users only while it is on the shelf', async () => {
-    const { users, wechat, catalog } = buildStage1();
-    wechat.logins.set('code-a', { openid: 'openid-a', unionid: null });
-    const buyer = await users.loginWithMiniProgram('code-a');
+    const { catalog } = buildStage1();
     const created = await catalog.create({
       zone: PRODUCT_ZONE_STARTUP,
       name: '待上架',
@@ -134,7 +131,7 @@ describe('catalog visibility, startup price, and admin users', () => {
       stockQuantity: 6,
     });
     expect(created.product.status).toBe('draft');
-    const hidden = await catalog.listPublic(buyer.user.id, {
+    const hidden = await catalog.listPublic({
       zone: PRODUCT_ZONE_STARTUP,
       page: 1,
       pageSize: 20,
@@ -146,7 +143,7 @@ describe('catalog visibility, startup price, and admin users', () => {
     });
 
     await catalog.setShelf(created.product.id, 'on');
-    const shown = await catalog.listPublic(buyer.user.id, {
+    const shown = await catalog.listPublic({
       zone: PRODUCT_ZONE_STARTUP,
       page: 1,
       pageSize: 20,
@@ -158,13 +155,13 @@ describe('catalog visibility, startup price, and admin users', () => {
     const off = await catalog.setShelf(created.product.id, 'off');
     expect(off.stockQuantity).toBe(9);
     expect(off.status).toBe('off');
-    const after = await catalog.listPublic(buyer.user.id, {
+    const after = await catalog.listPublic({
       zone: PRODUCT_ZONE_STARTUP,
       page: 1,
       pageSize: 20,
     });
     expect(after.items).toEqual([]);
-    await expect(catalog.getPublic(buyer.user.id, created.product.id)).rejects.toBeInstanceOf(
+    await expect(catalog.getPublic(created.product.id)).rejects.toBeInstanceOf(
       NotFoundException,
     );
   });

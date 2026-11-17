@@ -10,6 +10,8 @@ import { ClockService } from '../../common/clock/clock.service';
 import { enqueueNotify } from '../../common/notify/notify-buffer';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { KycService } from '../users/kyc.service';
+import { MESSAGE_CATEGORY_WALLET } from '../messages/message.constants';
+import { MessagesService, yuanText } from '../messages/messages.service';
 import { USER_STATUS_ACTIVE } from '../../common/auth/user-status';
 import { CashLedgerService } from './cash-ledger.service';
 import {
@@ -69,6 +71,7 @@ export class WithdrawalService {
     private readonly wallet: WalletService,
     private readonly kyc: KycService,
     private readonly cash: CashLedgerService,
+    private readonly messages: MessagesService,
   ) {}
 
   async apply(userId: bigint, amountFen: bigint): Promise<WithdrawalView> {
@@ -226,6 +229,19 @@ export class WithdrawalService {
         orderNo: current.id.toString(),
         occurredAt: now,
       });
+      await this.messages.record(
+        tx,
+        {
+          userId: current.userId,
+          category: MESSAGE_CATEGORY_WALLET,
+          title: '提现未通过',
+          body: `提现申请 #${current.id.toString()}（${yuanText(current.amountFen)}）未通过，金额已退回可提现余额。`,
+          linkPage: '/pages/wallet/withdrawals',
+          bizType: 'withdrawal',
+          bizId: current.id.toString(),
+        },
+        now,
+      );
       return { updated, settlement };
     });
     return toView(row.updated, row.settlement);
@@ -279,6 +295,19 @@ export class WithdrawalService {
         orderNo: current.id.toString(),
         occurredAt: now,
       });
+      await this.messages.record(
+        tx,
+        {
+          userId: current.userId,
+          category: MESSAGE_CATEGORY_WALLET,
+          title: '提现已打款',
+          body: `提现申请 #${current.id.toString()} 的 ${yuanText(payoutFen)} 已按申请金额打款，请注意查收。`,
+          linkPage: '/pages/wallet/withdrawals',
+          bizType: 'withdrawal',
+          bizId: current.id.toString(),
+        },
+        now,
+      );
       return { updated, settlement };
     });
     return toView(row.updated, row.settlement);

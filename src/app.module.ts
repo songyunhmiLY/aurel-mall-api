@@ -14,6 +14,7 @@ import { StudioModule } from './modules/studio/studio.module';
 import { CmsModule } from './modules/cms/cms.module';
 import { FinanceModule } from './modules/finance/finance.module';
 import { HealthModule } from './modules/health/health.module';
+import { MessagesModule } from './modules/messages/messages.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { AdminModule } from './modules/admin/admin.module';
 import { OpsModule } from './modules/ops/ops.module';
@@ -53,6 +54,7 @@ import { WalletModule } from './modules/wallet/wallet.module';
     StudioModule,
     OpsTeamModule,
     NotificationsModule,
+    MessagesModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })

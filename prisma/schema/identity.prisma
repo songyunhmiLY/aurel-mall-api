@@ -13,6 +13,8 @@ model User {
   member    Boolean
   /// 已经写入市场席位。停用用户仍保持 true。
   seated    Boolean
+  /// 上次查看系统消息的时间。晚于它的消息算未读，用于小程序红点。
+  messagesReadAt DateTime? @map("messages_read_at") @db.DateTime(3)
   createdAt DateTime @map("created_at") @db.DateTime(3)
   updatedAt DateTime @map("updated_at") @db.DateTime(3)
 

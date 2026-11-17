@@ -10,6 +10,8 @@ import {
 import { PrismaService } from '../../../common/prisma/prisma.service';
 import type { LockedRuntimeConfig } from '../../../config/locked-runtime';
 import { LOCKED_RUNTIME_CONFIG } from '../../../config/tokens';
+import { MESSAGE_CATEGORY_WALLET } from '../../messages/message.constants';
+import { MessagesService, yuanText } from '../../messages/messages.service';
 import { WALLET_POINTS, WALLET_WITHDRAWABLE } from '../../wallet/wallet.constants';
 import { AwardCreditService } from '../award-credit.service';
 import { applyBps } from '../award-split';
@@ -40,6 +42,7 @@ export class FilingService {
     private readonly clock: ClockService,
     @Inject(LOCKED_RUNTIME_CONFIG) private readonly locked: LockedRuntimeConfig,
     private readonly credits: AwardCreditService,
+    private readonly messages: MessagesService,
   ) {}
 
   async onStartupPaid(
@@ -305,6 +308,19 @@ export class FilingService {
       orderNo,
       occurredAt: now,
     });
+    await this.messages.record(
+      tx,
+      {
+        userId: beneficiary.userId,
+        category: MESSAGE_CATEGORY_WALLET,
+        title: '幸运返还到账',
+        body: `订单 ${orderNo} 的幸运返回到账：积分 ${yuanText(pointsFen)}，可提现 ${yuanText(withdrawableFen)}。`,
+        linkPage: '/pages/wallet/ledger',
+        bizType: 'filing_settlement',
+        bizId: beneficiary.id.toString(),
+      },
+      now,
+    );
   }
 }
 

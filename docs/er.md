@@ -22,13 +22,14 @@
 
 `admin_settings` 只放管理员可改的配置（营销经理市场门槛 T、微信支付商户号、API 证书、APIv3 密钥，以及消息推送的事件开关、全局通道、短信密钥和各事件模板）。锁定配置不进这张表。证书和密钥放在 `TEXT` 字段里。
 
-`users.phone` 是微信手机号组件绑定的号码，可空、不唯一。`users.invite_code` 根账户固定为 `000000`。其他用户在第一次入座前为空，入座时写入另外的 6 位数字码，不会使用 `000000`。`users.member` 和 `users.seated` 表示已经有市场席位，入座时一起写成 true。`user_kyc` 保存姓名、身份证号和手机号；格式通过后 `status = verified`。
+`users.phone` 是微信手机号组件绑定的号码，可空、不唯一。`users.invite_code` 根账户固定为 `000000`。其他用户在第一次入座前为空，入座时写入另外的 6 位数字码，不会使用 `000000`。`users.member` 和 `users.seated` 表示已经有市场席位，入座时一起写成 true。`users.messages_read_at` 是上次查看站内消息的时间，晚于它的消息算未读。`user_kyc` 保存姓名、身份证号和手机号；格式通过后 `status = verified`。`user_messages` 是站内消息，一条消息只属于一个用户，业务事件发生时与业务同事务写入。
 
 ```mermaid
 erDiagram
   users ||--o{ user_identities : "user_id"
   users ||--o| user_kyc : "user_id"
   users ||--o{ user_addresses : "user_id"
+  users ||--o{ user_messages : "user_id"
   admin_users |o--o{ admin_settings : "updated_by_admin_id"
 
   users {
@@ -39,6 +40,7 @@ erDiagram
     varchar invite_code UK
     boolean member
     boolean seated
+    datetime messages_read_at
     datetime created_at
     datetime updated_at
   }
@@ -62,6 +64,15 @@ erDiagram
     bigint user_id
     varchar contact_name
     boolean is_default
+  }
+  user_messages {
+    bigint id PK
+    bigint user_id
+    varchar category
+    varchar title
+    varchar body
+    varchar link_page
+    datetime created_at
   }
   admin_users {
     bigint id PK

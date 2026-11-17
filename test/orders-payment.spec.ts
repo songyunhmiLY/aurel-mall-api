@@ -341,7 +341,7 @@ describe('orders and forced payment', () => {
         addressId,
         items: [{ productId: gift.id, quantity: 1 }],
       }),
-    ).rejects.toThrow('非会员不能购买会员商城');
+    ).rejects.toThrow('该产品只有会员才能下单');
     expect(stage.db.order.rows).toHaveLength(0);
 
     const startup = await startupProduct(stage, '创业装', 2);

@@ -1,6 +1,7 @@
 import type { ClockService } from '../src/common/clock/clock.service';
 import type { PrismaService } from '../src/common/prisma/prisma.service';
 import { PRODUCT_ZONE_MALL } from '../src/modules/catalog/catalog.constants';
+import { MessagesService } from '../src/modules/messages/messages.service';
 import { OrderTimeoutService } from '../src/modules/orders/order-timeout.service';
 import {
   addressOf,
@@ -17,6 +18,7 @@ function timeoutsOf(stage: Stage2): OrderTimeoutService {
     stage.clock as unknown as ClockService,
     stage.wallet,
     stage.env,
+    new MessagesService(stage.db as unknown as PrismaService, stage.clock as unknown as ClockService),
   );
 }
 

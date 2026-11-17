@@ -1,0 +1,21 @@
+/// 站内系统消息。一条消息只属于一个用户，业务事件发生时在同一事务里写入。
+/// 未读判定不落在消息行上，而是比较用户的 users.messages_read_at：
+/// created_at 晚于该时间即为未读，用户打开消息列表时刷新该时间。
+model UserMessage {
+  id        BigInt   @id @default(autoincrement())
+  userId    BigInt   @map("user_id")
+  /// order：订单类；wallet：提现与奖励到账。
+  category  String   @db.VarChar(32)
+  title     String   @db.VarChar(64)
+  body      String   @db.VarChar(500)
+  /// 小程序页面路径，点击消息后跳转。为空表示只展示正文。
+  linkPage  String?  @map("link_page") @db.VarChar(255)
+  /// 溯源用的业务类型与业务号，例如 order、withdrawal。不在列表展示。
+  bizType   String?  @map("biz_type") @db.VarChar(32)
+  bizId     String?  @map("biz_id") @db.VarChar(64)
+  createdAt DateTime @map("created_at") @db.DateTime(3)
+
+  @@index([userId, createdAt], map: "user_messages_user_created_idx")
+  @@index([createdAt], map: "user_messages_created_idx")
+  @@map("user_messages")
+}

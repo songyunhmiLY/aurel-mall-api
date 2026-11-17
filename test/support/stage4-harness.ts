@@ -2,6 +2,7 @@ import type { ClockService } from '../../src/common/clock/clock.service';
 import type { PrismaService } from '../../src/common/prisma/prisma.service';
 import type { LockedRuntimeConfig } from '../../src/config/locked-runtime';
 import { DueJobRunner } from '../../src/jobs/due-job.runner';
+import { MessagesService } from '../../src/modules/messages/messages.service';
 import { OrderTimeoutService } from '../../src/modules/orders/order-timeout.service';
 import { CofounderAdminService } from '../../src/modules/cofounder/cofounder-admin.service';
 import { CofounderDividendService } from '../../src/modules/cofounder/cofounder-dividend.service';
@@ -68,7 +69,8 @@ export function buildStage4(locked: LockedRuntimeConfig = stage4Locked(), thresh
   const wallet = new WalletService(prisma, clock);
   const trees = new TreesService();
   const credits = new AwardCreditService(wallet);
-  const filing = new FilingService(prisma, clock, locked, credits);
+  const messages = new MessagesService(prisma, clock);
+  const filing = new FilingService(prisma, clock, locked, credits, messages);
   const awards = new AwardService(locked, credits);
   const cofounderPool = new CofounderPoolService(prisma);
   const cofounderSettings = new CofounderSettingsService(prisma, clock);
@@ -89,6 +91,7 @@ export function buildStage4(locked: LockedRuntimeConfig = stage4Locked(), thresh
     cofounderDividend,
     studioSubsidy,
     opsTeamDividend,
+    messages,
   );
   const hook = new PaymentSettlementHook(paid);
   const cash = new CashLedgerService();
@@ -117,7 +120,17 @@ export function buildStage4(locked: LockedRuntimeConfig = stage4Locked(), thresh
     undefined,
     cash,
   );
-  const orders = new OrdersService(prisma, clock, wallet, trees, settlement, wechatPay, locked, env);
+  const orders = new OrdersService(
+    prisma,
+    clock,
+    wallet,
+    trees,
+    settlement,
+    wechatPay,
+    locked,
+    env,
+    messages,
+  );
   const cofounderEnrollment = new CofounderEnrollmentService(
     prisma,
     clock,
@@ -162,7 +175,7 @@ export function buildStage4(locked: LockedRuntimeConfig = stage4Locked(), thresh
     paySettings as unknown as WechatPaySettingsService,
     gateway as unknown as WechatPayGateway,
   );
-  const orderTimeouts = new OrderTimeoutService(prisma, clock, wallet, env);
+  const orderTimeouts = new OrderTimeoutService(prisma, clock, wallet, env, messages);
   const jobs = new DueJobRunner(
     filing,
     positions,
@@ -197,6 +210,7 @@ export function buildStage4(locked: LockedRuntimeConfig = stage4Locked(), thresh
     walletAdmin,
     compensations,
     orderTimeouts,
+    messages,
     performance,
     wechatPay,
     paySettings,

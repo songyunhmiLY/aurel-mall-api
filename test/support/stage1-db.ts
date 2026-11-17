@@ -384,6 +384,7 @@ export class Stage1Db {
   readonly cashLedgerEntry = new MemoryTable([]);
   readonly orderRefund = new MemoryTable([['wechatRefundNo']]);
   readonly settlementCompensation = new MemoryTable([['orderId']]);
+  readonly userMessage = new MemoryTable([]);
   readonly rewardLedgerEntry = new MemoryTable([['userId', 'rewardType', 'bizType', 'bizId']]);
   readonly startupSubOrder = new MemoryTable([]);
   readonly filing = new MemoryTable([
