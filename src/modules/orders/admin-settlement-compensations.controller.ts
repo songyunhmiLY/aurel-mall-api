@@ -1,4 +1,4 @@
-import { Body, Controller, Get, GoneException, HttpCode, Param, Post, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, GoneException, HttpCode, Param, Post, Query, UseGuards } from '@nestjs/common';
 import { AdminJwtGuard } from '../../common/auth/admin-jwt.guard';
 import type { AdminPrincipal } from '../../common/auth/admin-principal';
 import { CurrentAdmin } from '../../common/auth/current-admin.decorator';
@@ -8,7 +8,7 @@ import { SettlementCompensationService } from './settlement-compensation.service
 /**
  * 结算补偿的管理端接口。挂在资金分组下：
  * GET    /admin/finance/settlement-compensations          列表
- * POST   /admin/finance/settlement-compensations/:id/retry   继续结算（可带 subsidize）
+ * POST   /admin/finance/settlement-compensations/:id/retry   继续结算
  * POST   /admin/finance/settlement-compensations/:id/refund  转退款（已下线，410）
  */
 @Controller('admin/finance/settlement-compensations')
@@ -31,15 +31,8 @@ export class AdminSettlementCompensationsController {
 
   @Post(':id/retry')
   @HttpCode(200)
-  retry(
-    @CurrentAdmin() admin: AdminPrincipal,
-    @Param('id') id: string,
-    @Body() body: { subsidize?: boolean },
-  ) {
-    return this.compensations.retryOne(parseRouteId(id), {
-      adminId: admin.id,
-      subsidize: body?.subsidize === true,
-    });
+  retry(@CurrentAdmin() admin: AdminPrincipal, @Param('id') id: string) {
+    return this.compensations.retryOne(parseRouteId(id), { adminId: admin.id });
   }
 
   /**

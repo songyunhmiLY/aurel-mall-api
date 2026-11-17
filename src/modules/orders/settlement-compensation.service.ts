@@ -7,15 +7,8 @@ import {
 import type { Prisma } from '@prisma/client';
 import { ClockService } from '../../common/clock/clock.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
-import { PRODUCT_ZONE_STARTUP } from '../catalog/catalog.constants';
 import { CashLedgerService } from '../wallet/cash-ledger.service';
-import {
-  CASH_WECHAT_REFUND,
-  WALLET_CONSUMPTION,
-  WALLET_POINTS,
-  WALLET_WITHDRAWABLE,
-  type WalletType,
-} from '../wallet/wallet.constants';
+import { CASH_WECHAT_REFUND } from '../wallet/wallet.constants';
 import { WalletService } from '../wallet/wallet.service';
 import { WechatPayGateway, WechatRefundAlreadyAccepted } from '../payments/wechat-pay.gateway';
 import { WechatPaySettingsService } from '../payments/wechat-pay-settings.service';
@@ -30,7 +23,6 @@ import {
   COMPENSATION_MAX_RETRY,
   COMPENSATION_REFUNDED,
   COMPENSATION_RETRY_INTERVAL_MS,
-  WALLET_COMPENSATION_SUBSIDY,
 } from './settlement-compensation.constants';
 
 type Tx = Prisma.TransactionClient;
@@ -65,7 +57,7 @@ export interface CompensationPage {
  * 结算补偿。原则：钱已收到，优先继续完成订单，退款只是最后兜底。
  * 库存不参与结算，因此不会因库存失败。
  * 分流：
- *   - 钱包份额不足 → 待人工（补差 / 转退款）
+ *   - 钱包份额不足 → 待人工（订单页黄色「！」标记 + 手动完成结算）
  *   - 订单被超时取消 / 入座失败 / 环境类故障 → 自动重试
  */
 @Injectable()
@@ -83,12 +75,12 @@ export class SettlementCompensationService {
   ) {}
 
   /**
-   * 重试一笔补偿。subsidize 为 true 时先按订单拆分份额给钱包补足
-   * （只补该专区实际参与支付的账户，复用原拆分口径，不发明新顺序），再继续结算。
+   * 重试一笔补偿。自动重试任务与管理端「继续结算」共用；
+   * 钱包份额不足时不垫钱，转待人工，由订单页手动完成结算兜底。
    */
   async retryOne(
     compensationId: bigint,
-    opts: { adminId?: bigint | null; subsidize?: boolean } = {},
+    opts: { adminId?: bigint | null } = {},
   ): Promise<CompensationView> {
     const now = await this.clock.now();
     const outcome = await this.prisma.$transaction(async (tx) => {
@@ -111,9 +103,6 @@ export class SettlementCompensationService {
       if (this.settler.orderAlreadySettled(order.status)) {
         await this.markCompleted(tx, comp.id, opts.adminId ?? null, now);
         return { id: comp.id, status: COMPENSATION_COMPLETED, failReason: comp.failReason };
-      }
-      if (opts.subsidize) {
-        await this.subsidizeWallets(tx, order, comp.id, now);
       }
       try {
         await this.settler.finishForCompensation(tx, order.id, now);
@@ -311,43 +300,9 @@ export class SettlementCompensationService {
   }
 
   /**
-   * 平台补差。只补订单上记录的、该专区参与支付的账户份额：
-   * 创业专区补积分+可提现，会员商城补消费金+可提现。微信部分钱已在手，不补。
+   * 平台补差已下线：钱包份额不足时不再由平台垫钱补足，
+   * 统一走订单页的「手动完成结算」（扣冻结/余额到单价对齐上限，缺口写订单备注）。
    */
-  private async subsidizeWallets(
-    tx: Tx,
-    order: { id: bigint; userId: bigint; zone: string; pointsFen: number; withdrawableFen: number; consumptionFen: number },
-    compensationId: bigint,
-    now: Date,
-  ): Promise<void> {
-    const portions: Array<[WalletType, number]> =
-      order.zone === PRODUCT_ZONE_STARTUP
-        ? [
-            [WALLET_POINTS, order.pointsFen],
-            [WALLET_WITHDRAWABLE, order.withdrawableFen],
-          ]
-        : [
-            [WALLET_CONSUMPTION, order.consumptionFen],
-            [WALLET_WITHDRAWABLE, order.withdrawableFen],
-          ];
-    for (const [walletType, amount] of portions) {
-      if (amount <= 0) {
-        continue;
-      }
-      await this.wallet.creditInTx(
-        tx,
-        {
-          userId: order.userId,
-          walletType,
-          amountFen: BigInt(amount),
-          bizType: WALLET_COMPENSATION_SUBSIDY,
-          bizId: `${order.id.toString()}_${compensationId.toString()}`,
-          sourceCode: null,
-        },
-        now,
-      );
-    }
-  }
 
   private async markCompleted(
     tx: Tx,

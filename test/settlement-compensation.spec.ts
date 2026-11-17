@@ -2,9 +2,6 @@ import { ConflictException } from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
 import { PRODUCT_ZONE_MALL, PRODUCT_ZONE_STARTUP } from '../src/modules/catalog/catalog.constants';
 import {
-  WALLET_COMPENSATION_SUBSIDY,
-} from '../src/modules/orders/settlement-compensation.constants';
-import {
   addressOf,
   boot,
   buildStage2,
@@ -158,7 +155,7 @@ describe('settlement compensation', () => {
     );
   });
 
-  it('moves to awaiting_operation on wallet shortfall and finishes after platform subsidy', async () => {
+  it('moves to awaiting_operation on wallet shortfall and completes via forced settlement', async () => {
     const stage = buildStage2();
     const rootId = await boot(stage);
     const buyer = await loginBuyer(stage, 'comp-shortfall', rootId);
@@ -200,19 +197,17 @@ describe('settlement compensation', () => {
     expect(short.failReason).toBe('wallet_shortfall');
     expect(orderRow(stage, created.id).status).toBe('closed');
 
-    // 平台补差按订单拆分份额补足（创业专区：积分+可提现），随后继续结算
-    const done = await stage.compensations.retryOne(compRows(stage)[0]!.id, {
-      subsidize: true,
-      adminId: 1n,
-    });
-    expect(done.status).toBe('completed');
+    // 补差已下线：钱包份额不足时通过订单页「手动完成结算」兜底（扣到空、缺口写备注）
+    const done = await stage.compensations.forceComplete(compRows(stage)[0]!.id, 1n);
+    expect(done.view.status).toBe('completed');
+    expect(done.note).toContain('积分');
     expect(orderRow(stage, created.id).status).toBe('paid');
     const balances = await stage.wallet.getBalances(buyer);
     expect(balances.points.balanceFen).toBe(0n);
     const subsidy = stage.db.walletLedgerEntry.rows.filter(
-      (row) => row.userId === buyer && row.bizType === WALLET_COMPENSATION_SUBSIDY,
+      (row) => row.userId === buyer && row.bizType === 'compensation_subsidy',
     );
-    expect(subsidy).toHaveLength(1);
+    expect(subsidy).toHaveLength(0);
     expect(compRows(stage)[0]!.operatorAdminId).toBe(1n);
   });
 
