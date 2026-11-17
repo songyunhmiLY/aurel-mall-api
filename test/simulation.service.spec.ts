@@ -4,6 +4,13 @@ import type { PrismaService } from '../src/common/prisma/prisma.service';
 import type { AppEnv } from '../src/config/app-env';
 import { DueJobRunner } from '../src/jobs/due-job.runner';
 import { SimulationService } from '../src/modules/simulation/simulation.service';
+import type { UsersService } from '../src/modules/users/users.service';
+import type { OrdersService } from '../src/modules/orders/orders.service';
+import type { WechatPayService } from '../src/modules/payments/wechat-pay.service';
+import type { CofounderPayService } from '../src/modules/cofounder/cofounder-pay.service';
+import type { CofounderEnrollmentService } from '../src/modules/cofounder/cofounder-enrollment.service';
+import type { StudioEnrollmentService } from '../src/modules/studio/studio-enrollment.service';
+import type { OpsTeamEnrollmentService } from '../src/modules/ops-team/ops-team-enrollment.service';
 import type { SimulationEvent, SimulationStore } from '../src/modules/simulation/simulation.types';
 import { Stage1Db } from './support/stage1-db';
 import { stage1Env } from './support/stage1-harness';
@@ -93,6 +100,13 @@ function buildService(input: { enabled: boolean; env?: Partial<AppEnv> }) {
     clock as unknown as ClockService,
     runner,
     db as unknown as PrismaService,
+    {} as unknown as UsersService,
+    {} as unknown as OrdersService,
+    {} as unknown as WechatPayService,
+    {} as unknown as CofounderPayService,
+    {} as unknown as CofounderEnrollmentService,
+    {} as unknown as StudioEnrollmentService,
+    {} as unknown as OpsTeamEnrollmentService,
     store,
     env,
   );

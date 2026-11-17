@@ -11,6 +11,8 @@ export const IDENTITY_PROVIDERS = {
   smsPhone: 'sms_phone',
   preview: 'preview',
   systemRoot: 'system_root',
+  /** 仿真台批量注册的用户。不能登录，只用于造数与演练。 */
+  simulation: 'simulation',
 } as const;
 
 export type IdentityProvider = (typeof IDENTITY_PROVIDERS)[keyof typeof IDENTITY_PROVIDERS];

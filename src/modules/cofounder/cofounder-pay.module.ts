@@ -10,5 +10,6 @@ import { CofounderModule } from './cofounder.module';
   imports: [AuthModule, ClockModule, CofounderModule, forwardRef(() => PaymentsModule)],
   controllers: [CofounderPayController],
   providers: [CofounderPayService],
+  exports: [CofounderPayService],
 })
 export class CofounderPayModule {}
