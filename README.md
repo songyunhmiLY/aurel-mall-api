@@ -504,7 +504,7 @@ T **不是**锁定项。单位是分，比较的是市场里创业专区已支�
 
 需要管理员令牌：
 
-- `GET /api/v1/admin/withdrawals?status=&userId=&page=&pageSize=`
+- `GET /api/v1/admin/withdrawals?status=&userId=&from=&to=&page=&pageSize=`，`from`/`to` 是上海自然日 `YYYY-MM-DD`，按申请时间过滤（含结束日全天），可只传一边；管理端据此提供「导出 CSV」线下打款清单
 - `GET /api/v1/admin/withdrawals/:id`
 - `POST /api/v1/admin/withdrawals/:id/reject`
 - `POST /api/v1/admin/withdrawals/:id/payout`
@@ -604,7 +604,7 @@ T **不是**锁定项。单位是分，比较的是市场里创业专区已支�
 
 需要管理员令牌：
 
-- `GET /api/v1/admin/orders?zone=&status=&userId=&page=&pageSize=`
+- `GET /api/v1/admin/orders?zone=&status=&userId=&from=&to=&page=&pageSize=`，`from`/`to` 是上海自然日 `YYYY-MM-DD`，按下单时间过滤（含结束日全天），可只传一边；管理端据此提供「导出 CSV」
 - `GET /api/v1/admin/orders/:id`
 - `POST /api/v1/admin/orders/:id/ship`，body：`{ "courierName": "顺丰", "trackingNumber": "SF100" }`
 

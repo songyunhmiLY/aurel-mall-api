@@ -1,6 +1,11 @@
 import { BadRequestException, ForbiddenException, ValidationPipe } from '@nestjs/common';
 import { validate } from 'class-validator';
 import { generateKeyPairSync } from 'node:crypto';
+import {
+  addShanghaiDays,
+  startOfNextShanghaiDay,
+  startOfShanghaiDay,
+} from '../src/common/clock/shanghai-calendar';
 import { PRODUCT_ZONE_MALL, PRODUCT_ZONE_STARTUP } from '../src/modules/catalog/catalog.constants';
 import { CreateOrderDto } from '../src/modules/orders/dto/create-order.dto';
 import type { WechatPayCredentials } from '../src/modules/payments/wechat-pay-settings.service';
@@ -259,6 +264,23 @@ describe('orders and forced payment', () => {
     });
     expect(listed.total).toBe(1);
     expect(listed.items[0]?.id).toBe(created.id);
+
+    // 下单时间区间过滤：当天命中，次日之后没有
+    const day = startOfShanghaiDay(stage.clock.current);
+    const today = await stage.orders.listAdmin({
+      placedFrom: day,
+      placedUntil: startOfNextShanghaiDay(day),
+      page: 1,
+      pageSize: 20,
+    });
+    expect(today.total).toBe(1);
+    const tomorrow = await stage.orders.listAdmin({
+      placedFrom: startOfNextShanghaiDay(day),
+      placedUntil: addShanghaiDays(startOfNextShanghaiDay(day), 1),
+      page: 1,
+      pageSize: 20,
+    });
+    expect(tomorrow.total).toBe(0);
   });
 
   it('rolls back a startup seat when the paid hook fails, and rejects an uninvited buyer', async () => {

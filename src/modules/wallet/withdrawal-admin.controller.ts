@@ -2,6 +2,7 @@ import { Controller, Get, HttpCode, Param, Post, Query, UseGuards } from '@nestj
 import { AdminJwtGuard } from '../../common/auth/admin-jwt.guard';
 import type { AdminPrincipal } from '../../common/auth/admin-principal';
 import { CurrentAdmin } from '../../common/auth/current-admin.decorator';
+import { parseShanghaiDayRange } from '../../common/http/day-range';
 import { parsePage, parsePageSize, parseRouteId } from '../../common/http/parse-id';
 import { WithdrawalService } from './withdrawal.service';
 
@@ -14,13 +15,18 @@ export class WithdrawalAdminController {
   list(
     @Query('status') status?: string,
     @Query('userId') userId?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
     @Query('page') page?: string,
     @Query('pageSize') pageSize?: string,
   ) {
+    const range = parseShanghaiDayRange(from, to);
     return this.withdrawals.listAdmin({
       status: status === undefined || status.trim() === '' ? undefined : status.trim(),
       userId:
         userId === undefined || userId.trim() === '' ? undefined : parseRouteId(userId.trim()),
+      appliedFrom: range.from,
+      appliedUntil: range.until,
       page: parsePage(page),
       pageSize: parsePageSize(pageSize),
     });

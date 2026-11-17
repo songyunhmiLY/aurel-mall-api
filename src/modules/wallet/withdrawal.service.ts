@@ -146,6 +146,8 @@ export class WithdrawalService {
   async listAdmin(query: {
     status?: string;
     userId?: bigint;
+    appliedFrom?: Date;
+    appliedUntil?: Date;
     page: number;
     pageSize: number;
   }): Promise<WithdrawalPage> {
@@ -161,6 +163,14 @@ export class WithdrawalService {
       {
         ...(query.status ? { status: query.status } : {}),
         ...(query.userId !== undefined ? { userId: query.userId } : {}),
+        ...(query.appliedFrom !== undefined || query.appliedUntil !== undefined
+          ? {
+              appliedAt: {
+                ...(query.appliedFrom !== undefined ? { gte: query.appliedFrom } : {}),
+                ...(query.appliedUntil !== undefined ? { lt: query.appliedUntil } : {}),
+              },
+            }
+          : {}),
       },
       query.page,
       query.pageSize,
@@ -289,7 +299,11 @@ export class WithdrawalService {
   }
 
   private async list(
-    where: { userId?: bigint; status?: string },
+    where: {
+      userId?: bigint;
+      status?: string;
+      appliedAt?: { gte?: Date; lt?: Date };
+    },
     page: number,
     pageSize: number,
   ): Promise<WithdrawalPage> {

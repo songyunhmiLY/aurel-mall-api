@@ -2,6 +2,11 @@ import { nonOrderCashRows } from './support/stage1-db';
 import { ConflictException, ForbiddenException } from '@nestjs/common';
 import type { ClockService } from '../src/common/clock/clock.service';
 import type { PrismaService } from '../src/common/prisma/prisma.service';
+import {
+  addShanghaiDays,
+  startOfNextShanghaiDay,
+  startOfShanghaiDay,
+} from '../src/common/clock/shanghai-calendar';
 import { PRODUCT_ZONE_MALL, PRODUCT_ZONE_STARTUP } from '../src/modules/catalog/catalog.constants';
 import { RefundsService } from '../src/modules/orders/refunds.service';
 import {
@@ -206,6 +211,23 @@ describe('stage 3 wallets, transfers, withdrawals, and mall refunds', () => {
       }),
     ]);
     await expect(withdrawals.payout(again.id, 7n)).rejects.toThrow('提现申请已处理');
+
+    // 申请时间区间过滤：当天两笔都在，明天以后没有
+    const day = startOfShanghaiDay(stage.clock.current);
+    const today = await withdrawals.listAdmin({
+      appliedFrom: day,
+      appliedUntil: startOfNextShanghaiDay(day),
+      page: 1,
+      pageSize: 20,
+    });
+    expect(today.total).toBe(2);
+    const tomorrow = await withdrawals.listAdmin({
+      appliedFrom: startOfNextShanghaiDay(day),
+      appliedUntil: addShanghaiDays(startOfNextShanghaiDay(day), 1),
+      page: 1,
+      pageSize: 20,
+    });
+    expect(tomorrow.total).toBe(0);
   });
 
   it('groups withdrawal display categories by the configured name', async () => {

@@ -1,5 +1,6 @@
 import { Body, Controller, Get, HttpCode, Param, Post, Query, UseGuards } from '@nestjs/common';
 import { AdminJwtGuard } from '../../common/auth/admin-jwt.guard';
+import { parseShanghaiDayRange } from '../../common/http/day-range';
 import { parsePage, parsePageSize, parseRouteId } from '../../common/http/parse-id';
 import { ShipOrderDto } from './dto/ship-order.dto';
 import { OrdersService } from './orders.service';
@@ -20,14 +21,19 @@ export class AdminOrdersController {
     @Query('zone') zone?: string,
     @Query('status') status?: string,
     @Query('userId') userId?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
     @Query('page') page?: string,
     @Query('pageSize') pageSize?: string,
   ) {
+    const range = parseShanghaiDayRange(from, to);
     return this.orders.listAdmin({
       zone: zone === undefined || zone.trim() === '' ? undefined : zone.trim(),
       status: status === undefined || status.trim() === '' ? undefined : status.trim(),
       userId:
         userId === undefined || userId.trim() === '' ? undefined : parseRouteId(userId.trim()),
+      placedFrom: range.from,
+      placedUntil: range.until,
       page: parsePage(page),
       pageSize: parsePageSize(pageSize),
     });

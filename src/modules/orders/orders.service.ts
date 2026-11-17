@@ -311,6 +311,8 @@ export class OrdersService {
     zone?: string;
     status?: string;
     userId?: bigint;
+    placedFrom?: Date;
+    placedUntil?: Date;
     page: number;
     pageSize: number;
   }): Promise<OrderPage> {
@@ -318,6 +320,8 @@ export class OrdersService {
       zone: query.zone === undefined ? undefined : parseZone(query.zone),
       status: query.status === undefined ? undefined : parseStatus(query.status),
       userId: query.userId,
+      placedFrom: query.placedFrom,
+      placedUntil: query.placedUntil,
       page: query.page,
       pageSize: query.pageSize,
     });
@@ -463,6 +467,8 @@ export class OrdersService {
     userId?: bigint;
     zone?: string;
     status?: string;
+    placedFrom?: Date;
+    placedUntil?: Date;
     page: number;
     pageSize: number;
   }): Promise<OrderPage> {
@@ -475,6 +481,12 @@ export class OrdersService {
     }
     if (query.status !== undefined) {
       where.status = query.status;
+    }
+    if (query.placedFrom !== undefined || query.placedUntil !== undefined) {
+      where.placedAt = {
+        ...(query.placedFrom !== undefined ? { gte: query.placedFrom } : {}),
+        ...(query.placedUntil !== undefined ? { lt: query.placedUntil } : {}),
+      };
     }
     const [total, rows] = await Promise.all([
       this.prisma.order.count({ where }),
