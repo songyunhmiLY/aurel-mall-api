@@ -114,6 +114,9 @@ async function seedStartupZone(
       freightFen: 0,
       categoryId: null,
       status: PRODUCT_STATUS_ON,
+      // 种子商品默认上首页，排序 0 让创业专区排在混排列表最前。
+      sortOrder: 0,
+      homeVisible: true,
       createdAt: now,
       updatedAt: now,
     },
@@ -177,6 +180,9 @@ async function seedMall(prisma: PrismaClient, clock: ClockService): Promise<numb
         freightFen: 0,
         categoryId: categories[item.category] ?? null,
         status: PRODUCT_STATUS_ON,
+        // 种子商品按数组顺序给一个递增排序，默认全部上首页。
+        sortOrder: index + 1,
+        homeVisible: true,
         createdAt: now,
         updatedAt: now,
       },
