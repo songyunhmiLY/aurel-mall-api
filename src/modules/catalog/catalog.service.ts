@@ -45,6 +45,8 @@ export interface PublicProductView {
   priceFen: number;
   stockQuantity: number;
   category: CategoryBrief | null;
+  /** 混排顺序，数值小的排前面。用户端列表已按它排好，这里只是回显。 */
+  sortOrder: number;
   pvFen?: number;
 }
 
@@ -63,6 +65,8 @@ export interface AdminProductView {
   costFen: number | null;
   stockQuantity: number;
   status: string;
+  sortOrder: number;
+  homeVisible: boolean;
   skuId: bigint;
   categoryId: bigint | null;
   category: CategoryBrief | null;
@@ -97,6 +101,10 @@ export interface CreateProductInput {
   /** 库存不参与下单与结算，只留档；不传按 0 记。 */
   stockQuantity?: number;
   status?: string;
+  /** 商城混排顺序。不传按 0 记，同值时按创建时间倒序。 */
+  sortOrder?: number;
+  /** 是否出现在小程序首页商品流。不传按 false 记。 */
+  homeVisible?: boolean;
 }
 
 export interface UpdateProductInput {
@@ -111,6 +119,8 @@ export interface UpdateProductInput {
   costFen?: number | null;
   categoryId?: bigint | null;
   status?: string;
+  sortOrder?: number;
+  homeVisible?: boolean;
 }
 
 export interface CategoryView {
@@ -143,6 +153,8 @@ export class CatalogService {
   async listPublic(query: {
     zone?: string;
     categoryId?: bigint;
+    /** 只返回管理端勾选了「首页展示」的商品。 */
+    home?: boolean;
     page: number;
     pageSize: number;
   }): Promise<PageResult<PublicProductView>> {
@@ -157,6 +169,7 @@ export class CatalogService {
       status: PRODUCT_STATUS_ON,
       ...(zone === undefined ? {} : { zone }),
       ...(query.categoryId !== undefined ? { categoryId: query.categoryId } : {}),
+      ...(query.home === true ? { homeVisible: true } : {}),
     };
     const page = await this.pageProducts(where, query.page, query.pageSize);
     return { ...page, items: page.items.map(toPublic) };
@@ -212,6 +225,8 @@ export class CatalogService {
     const commerce = this.resolveCommerce(zone, input.priceFen, input.pvFen, null, null);
     const categoryId = await this.resolveCategory(zone, input.categoryId, null);
     const status = input.status === undefined ? PRODUCT_STATUS_DRAFT : parseStatus(input.status);
+    const sortOrder = input.sortOrder === undefined ? 0 : assertSort(input.sortOrder);
+    const homeVisible = input.homeVisible === true;
     const now = await this.clock.now();
     const product = await this.prisma.$transaction(async (tx) => {
       const created = await tx.product.create({
@@ -224,6 +239,8 @@ export class CatalogService {
           freightFen: fields.freightFen,
           categoryId,
           status,
+          sortOrder,
+          homeVisible,
           createdAt: now,
           updatedAt: now,
         },
@@ -278,6 +295,8 @@ export class CatalogService {
       current.categoryId,
     );
     const status = input.status === undefined ? current.status : parseStatus(input.status);
+    const sortOrder = input.sortOrder === undefined ? current.sortOrder : assertSort(input.sortOrder);
+    const homeVisible = input.homeVisible === undefined ? current.homeVisible : input.homeVisible;
     const now = await this.clock.now();
     await this.prisma.$transaction(async (tx) => {
       await tx.product.update({
@@ -290,6 +309,8 @@ export class CatalogService {
           freightFen: input.freightFen === undefined ? current.freightFen : content.freightFen,
           categoryId,
           status,
+          sortOrder,
+          homeVisible,
           updatedAt: now,
         },
       });
@@ -335,6 +356,29 @@ export class CatalogService {
     await this.prisma.skuStock.update({
       where: { skuId: current.skuId },
       data: { quantity: stockQuantity, updatedAt: now },
+    });
+    return this.getAdmin(id);
+  }
+
+  /** 只改商城混排顺序，不动其他字段。列表按 sortOrder 升序，同值按创建时间倒序。 */
+  async setSort(id: bigint, sortOrder: number): Promise<AdminProductView> {
+    const value = assertSort(sortOrder);
+    await this.requireProduct(id);
+    const now = await this.clock.now();
+    await this.prisma.product.update({
+      where: { id },
+      data: { sortOrder: value, updatedAt: now },
+    });
+    return this.getAdmin(id);
+  }
+
+  /** 首页商品流开关。商品下架时即使勾选，也不会出现在用户端首页。 */
+  async setHomeVisible(id: bigint, homeVisible: boolean): Promise<AdminProductView> {
+    await this.requireProduct(id);
+    const now = await this.clock.now();
+    await this.prisma.product.update({
+      where: { id },
+      data: { homeVisible, updatedAt: now },
     });
     return this.getAdmin(id);
   }
@@ -385,7 +429,7 @@ export class CatalogService {
       this.prisma.product.count({ where }),
       this.prisma.product.findMany({
         where,
-        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        orderBy: [{ sortOrder: 'asc' }, { createdAt: 'desc' }, { id: 'desc' }],
         skip: (page - 1) * pageSize,
         take: pageSize,
       }),
@@ -656,6 +700,7 @@ function toPublic(product: AdminProductView): PublicProductView {
     priceFen: product.priceFen,
     stockQuantity: product.stockQuantity,
     category: product.category,
+    sortOrder: product.sortOrder,
   };
   if (product.zone === PRODUCT_ZONE_MALL && product.pvFen !== null) {
     view.pvFen = product.pvFen;
@@ -684,6 +729,8 @@ function toAdmin(
     costFen: sku.costFen,
     stockQuantity: stock.quantity,
     status: product.status,
+    sortOrder: product.sortOrder,
+    homeVisible: product.homeVisible,
     skuId: sku.id,
     categoryId: product.categoryId,
     category: category

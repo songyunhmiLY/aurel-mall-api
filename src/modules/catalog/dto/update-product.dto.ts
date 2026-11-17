@@ -1,6 +1,7 @@
 import {
   ArrayMaxSize,
   IsArray,
+  IsBoolean,
   IsIn,
   IsInt,
   IsOptional,
@@ -78,4 +79,16 @@ export class UpdateProductDto {
   @IsOptional()
   @IsIn(['draft', 'on', 'off'], { message: '商品状态不正确' })
   status?: 'draft' | 'on' | 'off';
+
+  /** 商城混排顺序，管理端配置。数值小的排前面；同值按创建时间倒序。 */
+  @IsOptional()
+  @IsInt()
+  @Min(-1_000_000)
+  @Max(1_000_000)
+  sortOrder?: number;
+
+  /** 是否出现在小程序首页商品流。 */
+  @IsOptional()
+  @IsBoolean()
+  homeVisible?: boolean;
 }

@@ -166,6 +166,82 @@ describe('catalog visibility, startup price, and admin users', () => {
     );
   });
 
+  it('sorts the mixed mall by the admin order and only feeds home-marked products', async () => {
+    const { catalog } = buildStage1();
+    const first = await catalog.create({
+      zone: PRODUCT_ZONE_MALL,
+      name: '商城一',
+      freightFen: 0,
+      priceFen: 1_000,
+      pvFen: 500,
+      stockQuantity: 1,
+      status: 'on',
+    });
+    const second = await catalog.create({
+      zone: PRODUCT_ZONE_STARTUP,
+      name: '创业装',
+      freightFen: 0,
+      stockQuantity: 1,
+      status: 'on',
+    });
+    const third = await catalog.create({
+      zone: PRODUCT_ZONE_MALL,
+      name: '商城二',
+      freightFen: 0,
+      priceFen: 2_000,
+      pvFen: 900,
+      stockQuantity: 1,
+      status: 'on',
+    });
+    expect(first.product.sortOrder).toBe(0);
+    expect(first.product.homeVisible).toBe(false);
+
+    // 没有配置排序时按创建时间倒序。
+    const initial = await catalog.listPublic({ page: 1, pageSize: 20 });
+    expect(initial.items.map((item) => item.id)).toEqual([
+      third.product.id,
+      second.product.id,
+      first.product.id,
+    ]);
+
+    // 管理端调小 sortOrder 就能把商品提到前面，越小的越靠前。
+    await catalog.setSort(first.product.id, -20);
+    await catalog.setSort(second.product.id, -10);
+    const sorted = await catalog.listPublic({ page: 1, pageSize: 20 });
+    expect(sorted.items.map((item) => item.id)).toEqual([
+      first.product.id,
+      second.product.id,
+      third.product.id,
+    ]);
+    expect(sorted.items[0]?.sortOrder).toBe(-20);
+    await expect(catalog.setSort(first.product.id, 1_000_001)).rejects.toThrow('排序不正确');
+
+    // 首页商品流只返回勾选了「首页展示」的商品，顺序与商城一致。
+    await catalog.setHomeVisible(second.product.id, true);
+    await catalog.setHomeVisible(first.product.id, true);
+    const home = await catalog.listPublic({ home: true, page: 1, pageSize: 20 });
+    expect(home.items.map((item) => item.id)).toEqual([first.product.id, second.product.id]);
+    expect(home.total).toBe(2);
+
+    // 下架的商品即使勾了首页也不出现。
+    await catalog.setShelf(second.product.id, 'off');
+    const afterOff = await catalog.listPublic({ home: true, page: 1, pageSize: 20 });
+    expect(afterOff.items.map((item) => item.id)).toEqual([first.product.id]);
+
+    // 编辑表单里也能一次改排序和首页开关。
+    const updated = await catalog.update(third.product.id, {
+      sortOrder: -30,
+      homeVisible: true,
+    });
+    expect(updated.product.sortOrder).toBe(-30);
+    expect(updated.product.homeVisible).toBe(true);
+    const homeAgain = await catalog.listPublic({ home: true, page: 1, pageSize: 20 });
+    expect(homeAgain.items.map((item) => item.id)).toEqual([
+      third.product.id,
+      first.product.id,
+    ]);
+  });
+
   it('searches users and disable does not remove the root market seat', async () => {
     const { db, users, wechat, adminUsers } = buildStage1();
     await users.onModuleInit();

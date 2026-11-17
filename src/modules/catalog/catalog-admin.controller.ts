@@ -19,6 +19,7 @@ import {
 import { CatalogService } from './catalog.service';
 import { CreateCategoryDto, UpdateCategoryDto } from './dto/category.dto';
 import { CreateProductDto } from './dto/create-product.dto';
+import { SetHomeVisibleDto, SetSortDto } from './dto/product-flags.dto';
 import { SetStockDto } from './dto/set-stock.dto';
 import { ShelfProductDto } from './dto/shelf-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
@@ -77,6 +78,16 @@ export class CatalogAdminController {
   @Put('products/:id/stock')
   setStock(@Param('id') id: string, @Body() body: SetStockDto) {
     return this.catalog.setStock(parseRouteId(id), body.quantity);
+  }
+
+  @Put('products/:id/sort')
+  setSort(@Param('id') id: string, @Body() body: SetSortDto) {
+    return this.catalog.setSort(parseRouteId(id), body.sortOrder);
+  }
+
+  @Put('products/:id/home')
+  setHomeVisible(@Param('id') id: string, @Body() body: SetHomeVisibleDto) {
+    return this.catalog.setHomeVisible(parseRouteId(id), body.homeVisible);
   }
 
   @Get('mall-categories')

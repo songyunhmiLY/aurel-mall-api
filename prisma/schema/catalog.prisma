@@ -13,11 +13,16 @@ model Product {
   /// 会员商城分类。创业专区为空。
   categoryId BigInt?  @map("category_id")
   status     String   @db.VarChar(32)
+  /// 商城混排顺序，由管理端配置。数值小的排前面；同值时按创建时间倒序。
+  sortOrder  Int      @default(0) @map("sort_order")
+  /// 是否出现在小程序首页商品流。由管理端逐件勾选。
+  homeVisible Boolean @default(false) @map("home_visible")
   createdAt  DateTime @map("created_at") @db.DateTime(3)
   updatedAt  DateTime @map("updated_at") @db.DateTime(3)
 
   @@index([zone, status], map: "products_zone_status_idx")
   @@index([categoryId], map: "products_category_id_idx")
+  @@index([status, sortOrder], map: "products_status_sort_idx")
   @@map("products")
 }
 
