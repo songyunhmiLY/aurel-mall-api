@@ -115,6 +115,7 @@ export class WechatPayService {
     @Optional()
     @Inject(forwardRef(() => CofounderActivationSettler))
     activationSettler?: CofounderActivationSettler,
+    @Optional()
     private readonly cash?: CashLedgerService,
   ) {
     this.activationSettler = activationSettler;
