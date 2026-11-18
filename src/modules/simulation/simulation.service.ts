@@ -13,12 +13,12 @@ import {
   shanghaiBizDate,
   startOfShanghaiDay,
 } from '../../common/clock/shanghai-calendar';
-import type { PrismaService } from '../../common/prisma/prisma.service';
+import { PrismaService } from '../../common/prisma/prisma.service';
 import type { AppEnv } from '../../config/app-env';
 import { APP_ENV } from '../../config/tokens';
 import { DueJobRunner } from '../../jobs/due-job.runner';
 import { IDENTITY_PROVIDERS } from '../users/identity.constants';
-import type { UsersService } from '../users/users.service';
+import { UsersService } from '../users/users.service';
 import { ROOT_INVITE_CODE } from '../users/identity.constants';
 import { CofounderPayService } from '../cofounder/cofounder-pay.service';
 import { CofounderEnrollmentService } from '../cofounder/cofounder-enrollment.service';
@@ -33,7 +33,7 @@ import {
 } from '../orders/settlement-compensation.constants';
 import { OrdersService } from '../orders/orders.service';
 import { WITHDRAWAL_PENDING } from '../wallet/wallet.constants';
-import type { WechatPayService } from '../payments/wechat-pay.service';
+import { WechatPayService } from '../payments/wechat-pay.service';
 import {
   SIMULATION_STORE,
   type SimulationDiff,
