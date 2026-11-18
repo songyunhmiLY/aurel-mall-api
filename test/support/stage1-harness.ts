@@ -16,9 +16,15 @@ export const UNIT_PRICE_FEN = 100_000;
 
 export class MutableClock {
   current = new Date('2026-11-13T00:00:00.000Z');
+  /** 系统真实时间。默认与 current 一致，仿真推进时只改 current。 */
+  realCurrent = new Date('2026-11-13T00:00:00.000Z');
 
   async now(): Promise<Date> {
     return this.current;
+  }
+
+  async realNow(): Promise<Date> {
+    return this.realCurrent;
   }
 
   instant(unixMs: number): Date {

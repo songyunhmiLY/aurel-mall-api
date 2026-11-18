@@ -29,6 +29,10 @@ class MutableClock {
     return this.current;
   }
 
+  async realNow(): Promise<Date> {
+    return this.current;
+  }
+
   instant(unixMs: number): Date {
     return new Date(unixMs);
   }

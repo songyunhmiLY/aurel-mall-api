@@ -59,6 +59,16 @@ export class ClockService {
     return resolved.now;
   }
 
+  /**
+   * 系统真实时间，忽略一切覆盖。
+   * 只给「不是业务数据」的场景用，例如管理员登录态的有效期：
+   * 仿真台把业务时钟推到几个月后，不该顺带把正在操作的人踢出登录。
+   * 业务时间仍然一律走 now()。
+   */
+  async realNow(): Promise<Date> {
+    return new Date();
+  }
+
   /** 由已知的 Unix 毫秒构造时刻，不是读取当前时间。 */
   instant(unixMs: number): Date {
     return new Date(unixMs);

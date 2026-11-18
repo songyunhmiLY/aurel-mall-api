@@ -29,7 +29,9 @@ export class MiniProgramTokenService {
   ) {}
 
   async issue(userId: bigint): Promise<IssuedMiniProgramToken> {
-    const now = await this.clock.now();
+    // 登录态有效期是真实世界的七天，不跟业务时钟。否则 staging 里推进一天仿真，
+    // 全部会员的 token 会立刻过期，小程序端得反复重新登录。
+    const now = await this.clock.realNow();
     const iat = Math.floor(now.getTime() / 1000);
     const exp = iat + MINI_PROGRAM_TOKEN_TTL_SECONDS;
     const header = base64urlJson({ alg: 'HS256', typ: 'JWT' });
@@ -85,7 +87,7 @@ export class MiniProgramTokenService {
     ) {
       throw new UnauthorizedException('登录已失效');
     }
-    const now = await this.clock.now();
+    const now = await this.clock.realNow();
     if (Math.floor(now.getTime() / 1000) >= payload.exp) {
       throw new UnauthorizedException('登录已失效');
     }

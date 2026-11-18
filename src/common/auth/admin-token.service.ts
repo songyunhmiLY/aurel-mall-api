@@ -18,6 +18,11 @@ interface AdminTokenPayload {
   exp: number;
 }
 
+/**
+ * 管理员登录态的有效期用真实时间，不跟业务时钟。
+ * staging 的仿真台会把业务时钟往后推几个月，如果这里读业务时间，
+ * 推一次就把正在操作的管理员踢回登录页，仿真台根本走不完一轮。
+ */
 @Injectable()
 export class AdminTokenService {
   constructor(
@@ -26,7 +31,7 @@ export class AdminTokenService {
   ) {}
 
   async issue(admin: { id: bigint; username: string }): Promise<IssuedAdminToken> {
-    const now = await this.clock.now();
+    const now = await this.clock.realNow();
     const iat = Math.floor(now.getTime() / 1000);
     const exp = iat + ADMIN_TOKEN_TTL_SECONDS;
     const header = base64urlJson({ alg: 'HS256', typ: 'JWT' });
@@ -80,7 +85,7 @@ export class AdminTokenService {
     ) {
       throw new UnauthorizedException('登录已失效');
     }
-    const now = await this.clock.now();
+    const now = await this.clock.realNow();
     if (Math.floor(now.getTime() / 1000) >= payload.exp) {
       throw new UnauthorizedException('登录已失效');
     }
