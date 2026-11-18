@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { AuthModule } from '../../common/auth/auth.module';
 import { ClockModule } from '../../common/clock/clock.module';
 import { JobsModule } from '../../jobs/jobs.module';
 import { CofounderPayModule } from '../cofounder/cofounder-pay.module';
@@ -19,6 +20,7 @@ import { SimulationService } from './simulation.service';
  */
 @Module({
   imports: [
+    AuthModule,
     ClockModule,
     JobsModule,
     UsersModule,
