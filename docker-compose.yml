@@ -50,7 +50,9 @@ services:
     ports:
       - '3000:3000'
     environment:
-      NODE_ENV: production
+      # 用单独的变量名，避免和宿主机 .env 里给本地开发用的 NODE_ENV 撞车。
+      # 正式部署保持 production；staging 想开仿真台设 DEPLOY_NODE_ENV=staging。
+      NODE_ENV: ${DEPLOY_NODE_ENV:-production}
       TZ: Asia/Shanghai
       PORT: 3000
       # 容器内固定走服务名，不使用 .env 里给宿主机开发准备的 127.0.0.1。
@@ -102,7 +104,7 @@ services:
       # 运营团队两条分红比例。官方示例 5% 和 7%。未结算占位不再读取。
       OPS_TEAM_STARTUP_DIVIDEND_RATIO_BPS: ${OPS_TEAM_STARTUP_DIVIDEND_RATIO_BPS:-500}
       OPS_TEAM_MALL_DIVIDEND_RATIO_BPS: ${OPS_TEAM_MALL_DIVIDEND_RATIO_BPS:-700}
-      # 提现手续费，单位分。示例 0，正式金额未确认。打款时读取当时的值。
+      # 提现手续费当前为 0（平台不收），没有对应环境变量。
       # T 不是锁定项。单位分。只在还没有生效月份时写入当前月；管理端修改从下月起生效。
       MARKETING_MANAGER_MARKET_THRESHOLD_DEFAULT: ${MARKETING_MANAGER_MARKET_THRESHOLD_DEFAULT:-2000000}
     healthcheck:

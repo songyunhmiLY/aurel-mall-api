@@ -7,6 +7,9 @@ import { LOCKED_RUNTIME_ENV_KEYS } from '../src/config/locked-runtime';
 const example = parse(readFileSync(join(__dirname, '..', '.env.example')));
 const compose = readFileSync(join(__dirname, '..', 'docker-compose.yml'), 'utf8');
 
+/** non-dev 环境要求 32 位以上，测试里用它顶替正式密钥。 */
+const longSecret = 'test-only-secret-0123456789abcdefghij';
+
 describe('locked runtime config', () => {
   it('parses the documented example and freezes it', () => {
     const env = parseAppEnv(example);
@@ -84,6 +87,16 @@ describe('locked runtime config', () => {
       parseAppEnv({ ...example, SIMULATION_ENABLED: 'true', NODE_ENV: 'development' })
         .simulationEnabled,
     ).toBe(true);
+    // staging 是仿真台的主要使用环境，必须能开。
+    expect(
+      parseAppEnv({
+        ...example,
+        NODE_ENV: 'staging',
+        SIMULATION_ENABLED: 'true',
+        JWT_ADMIN_SECRET: longSecret,
+        MINI_PROGRAM_TOKEN_SECRET: longSecret,
+      }).simulationEnabled,
+    ).toBe(true);
     expect(() =>
       parseAppEnv({ ...example, SIMULATION_ENABLED: 'true', NODE_ENV: 'production' }),
     ).toThrow(/SIMULATION_ENABLED/);
@@ -98,12 +111,12 @@ describe('locked runtime config', () => {
     expect(
       parseAppEnv({ ...example, ORDER_PAYMENT_TIMEOUT_MINUTES: '0' }).orderPaymentTimeoutMinutes,
     ).toBe(0);
-    expect(() =>
-      parseAppEnv({ ...example, ORDER_PAYMENT_TIMEOUT_MINUTES: '15m' }),
-    ).toThrow(/ORDER_PAYMENT_TIMEOUT_MINUTES/);
-    expect(() =>
-      parseAppEnv({ ...example, ORDER_PAYMENT_TIMEOUT_MINUTES: '1441' }),
-    ).toThrow(/ORDER_PAYMENT_TIMEOUT_MINUTES/);
+    expect(() => parseAppEnv({ ...example, ORDER_PAYMENT_TIMEOUT_MINUTES: '15m' })).toThrow(
+      /ORDER_PAYMENT_TIMEOUT_MINUTES/,
+    );
+    expect(() => parseAppEnv({ ...example, ORDER_PAYMENT_TIMEOUT_MINUTES: '1441' })).toThrow(
+      /ORDER_PAYMENT_TIMEOUT_MINUTES/,
+    );
   });
 
   it('rejects a wallet split that does not add up to 10000', () => {
@@ -242,10 +255,21 @@ describe('cors and secret hardening', () => {
     ).toThrow(/示例值/);
   });
 
-  it('requires long secrets in production and allows short ones in development', () => {
+  it('requires long secrets in production and development allows short ones', () => {
     expect(() =>
       parseAppEnv({ ...example, NODE_ENV: 'production', JWT_ADMIN_SECRET: 'short-but-unique' }),
     ).toThrow(/长度至少 32/);
+    // staging 和 production 同一标准：它会开仿真台，密钥不能松。
+    expect(() =>
+      parseAppEnv({ ...example, NODE_ENV: 'staging', JWT_ADMIN_SECRET: 'short-but-unique' }),
+    ).toThrow(/长度至少 32/);
+    expect(() =>
+      parseAppEnv({
+        ...example,
+        NODE_ENV: 'staging',
+        JWT_ADMIN_SECRET: 'dev-admin-jwt-placeholder',
+      }),
+    ).toThrow(/示例值/);
     expect(() =>
       parseAppEnv({ ...example, NODE_ENV: 'development', JWT_ADMIN_SECRET: 'short-but-unique' }),
     ).not.toThrow();

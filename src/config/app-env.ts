@@ -98,9 +98,9 @@ function readFlag(source: NodeJS.ProcessEnv, key: string): boolean {
 }
 
 /**
- * 时间仿真台只在测试/开发环境可用。
- * 默认关闭；显式为 true 时允许，但生产环境（NODE_ENV=production）一律拒绝启动，
- * 避免任何正式部署误开仿真。
+ * 时间仿真台只在非正式环境可用。
+ * 默认关闭；显式为 true 时允许。production 一律拒绝启动，
+ * staging / development / test 放行，避免正式部署误开仿真。
  */
 function readSimulationEnabled(source: NodeJS.ProcessEnv, nodeEnv: string): boolean {
   const enabled = readFlag(source, 'SIMULATION_ENABLED');
@@ -129,7 +129,7 @@ function readOrderPaymentTimeout(source: NodeJS.ProcessEnv): number {
   return minutes;
 }
 
-/** 仓库里出现过的示例密钥。生产环境出现这些值等同于没有设密码。 */
+/** 仓库里出现过的示例密钥。non-dev 环境出现这些值等同于没有设密码。 */
 const PLACEHOLDER_SECRETS = new Set([
   'dev-admin-jwt-placeholder',
   'dev-mini-program-placeholder',
@@ -137,17 +137,22 @@ const PLACEHOLDER_SECRETS = new Set([
   'changeme',
 ]);
 
+/** 只有本机开发与单测可以偷懒用短密钥；staging 和 production 一样按正式标准要求。 */
+function isLocalEnv(nodeEnv: string): boolean {
+  return nodeEnv === 'development' || nodeEnv === 'test';
+}
+
 function readSecret(source: NodeJS.ProcessEnv, key: string, nodeEnv: string): string {
   const value = readRequired(source, key);
   if (value.length < 8) {
     throw new Error(`环境变量 ${key} 长度至少 8`);
   }
-  if (nodeEnv === 'production') {
+  if (!isLocalEnv(nodeEnv)) {
     if (PLACEHOLDER_SECRETS.has(value)) {
-      throw new Error(`生产环境不接受 ${key} 的示例值，请换成随机密钥`);
+      throw new Error(`环境变量 ${key} 不接受示例值，请换成随机密钥`);
     }
     if (value.length < 32) {
-      throw new Error(`生产环境 ${key} 长度至少 32`);
+      throw new Error(`环境变量 ${key} 长度至少 32`);
     }
   }
   return value;

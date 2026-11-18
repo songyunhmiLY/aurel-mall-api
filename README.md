@@ -52,6 +52,94 @@ curl http://127.0.0.1:3000/api/v1/health
 docker compose stop api
 ```
 
+## staging 部署
+
+staging 和正式用同一套 compose，差别只在 `.env` 的几行。正式部署**不要**做下面这些改动。
+
+### 与正式的三行差别
+
+```bash
+DEPLOY_NODE_ENV=staging        # 容器里 API 的 NODE_ENV，默认 production
+SIMULATION_ENABLED=true        # 打开仿真台
+ALLOW_CLOCK_OVERRIDE=true      # 允许覆盖业务时钟，仿真台真正能改时间
+```
+
+`DEPLOY_NODE_ENV` 单独取名，是因为 `.env` 里的 `NODE_ENV` 是给宿主机 `npm run start:dev` 用的，两者混用会让正式部署意外跑进 staging 分支。`NODE_ENV=production` 下把 `SIMULATION_ENABLED` 设成 `true` 会直接拒绝启动，这是刻意的：正式环境不允许有可写业务时钟的通道。
+
+staging 下 `JWT_ADMIN_SECRET` 与 `MINI_PROGRAM_TOKEN_SECRET` 仍按正式标准校验，至少 32 位且不能是仓库里的示例值。
+
+### 首次上线要做的四件事
+
+```bash
+# 1. 起库与 API，entrypoint 会自动跑 migrate deploy
+docker compose up -d --build
+
+# 2. 灌基础数据：管理员、创业专区与商城商品、分类、首页内容、演示会员
+#    不灌的话首页全空，仿真台也没有可下单的创业专区商品
+docker compose exec api npm run db:seed
+
+# 3. 配微信支付商户资料（不配则只能走沙箱支付）
+#    PUT /api/v1/admin/settings/wechat-pay
+
+# 4. 在管理端「消息推送」填订阅消息模板 ID 与空位映射
+```
+
+根账户（邀请码 `000000`）由 API 启动时自动创建，不需要 seed。`db:seed` 幂等，重复执行不会重复建管理员、商品和会员。
+
+### 建议核对的环境变量
+
+| 变量                                     | staging 取值                                                    | 说明                                        |
+| ---------------------------------------- | --------------------------------------------------------------- | ------------------------------------------- |
+| `CORS_ORIGINS`                           | 管理端地址，如 `https://admin-staging.example.com`              | 用 nginx 反代 `/api` 时可以留空             |
+| `WECHAT_MINI_APP_ID` / `_SECRET`         | staging 小程序的 AppId / AppSecret                              | 留空则小程序登录不可用                      |
+| `WECHAT_PAY_NOTIFY_URL`                  | `https://api-staging.example.com/api/v1/payments/wechat/notify` | 必须是外网可达的 HTTPS                      |
+| `ALLOW_PREVIEW_AUTH`                     | 默认 `false`                                                    | 开了等于把测试身份开放给所有能访问 API 的人 |
+| `ADMIN_BOOTSTRAP_USERNAME` / `_PASSWORD` | 首次创建管理员                                                  | 已存在则不改密码                            |
+
+### 反向代理
+
+compose 只起 API、MySQL、Redis，没有 nginx。小程序要求 request 域名是 HTTPS，所以 staging 还需要一层反代。最小可用配置：
+
+```nginx
+server {
+  listen 443 ssl;
+  server_name api-staging.example.com;
+  # ssl_certificate / ssl_certificate_key 按证书位置填
+
+  client_max_body_size 8m;
+
+  location /api/ {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+  }
+}
+
+server {
+  listen 443 ssl;
+  server_name admin-staging.example.com;
+
+  # 管理端 npm run build 的产物直接放这里
+  root /srv/aurel-admin;
+  index index.html;
+
+  location / {
+    try_files $uri $uri/ /index.html;
+  }
+}
+```
+
+管理端和 API 不同域时，`CORS_ORIGINS` 要写上管理端来源；同域反代（管理端也走 `/api/`）则可以留空。
+
+### 运行注意
+
+- **API 只跑一个实例。** BullMQ 的 `due-jobs` 每个进程都会触发，多实例会重复扫描。任务本身幂等，不会重复入账，但会让日志和数据库压力翻倍。
+- **业务时钟被覆盖后，整个库的时间都跟着仿真时钟走。** staging 产生的订单、报单、分红时间都是假的，不要把这套库接到任何真实收款通道上。
+- **3306 / 6379 不要对公网开放。** 安全组只放 80 / 443，API 的 3000 也只给反向代理访问。
+- **备份 `mysql_data` 卷。** 仿真台的「重置业务数据」不可恢复。
+
 ## 在宿主机上改代码
 
 远程或本机若要直接跑 Nest 而不是跑容器里的 API，用 nvm 或 fnm 读取 `.nvmrc`，不要用系统里随便一个 Node。
@@ -841,7 +929,7 @@ BullMQ 队列 `due-jobs` 大约每 30 秒触发一次，进程启动时也会跑
 
 只在非正式环境使用。业务代码全部通过 `ClockService.now()` 取时间，仿真台把业务时钟覆盖到任意时刻，就能让公排、报单、分红按历史时间重放。
 
-开关是 `SIMULATION_ENABLED` 与 `ALLOW_CLOCK_OVERRIDE`，两个都打开才能用。`SIMULATION_ENABLED` 默认关闭，生产环境设成 `true` 会直接拒绝启动；关掉时所有接口返回 403，不区分调用方。
+开关是 `SIMULATION_ENABLED` 与 `ALLOW_CLOCK_OVERRIDE`，两个都打开才能用。容器部署时还要把 `DEPLOY_NODE_ENV` 设成 `staging`，见上文「staging 部署」。`SIMULATION_ENABLED` 默认关闭，`NODE_ENV=production` 时设成 `true` 会直接拒绝启动；关掉时所有接口返回 403，不区分调用方。
 
 接口都在 `admin/simulation` 下，要求管理员登录：
 
