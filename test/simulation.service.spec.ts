@@ -7,6 +7,7 @@ import { SimulationService } from '../src/modules/simulation/simulation.service'
 import type { UsersService } from '../src/modules/users/users.service';
 import type { OrdersService } from '../src/modules/orders/orders.service';
 import type { WechatPayService } from '../src/modules/payments/wechat-pay.service';
+import type { CofounderSettingsService } from '../src/modules/cofounder/cofounder-settings.service';
 import type { CofounderPayService } from '../src/modules/cofounder/cofounder-pay.service';
 import type { CofounderEnrollmentService } from '../src/modules/cofounder/cofounder-enrollment.service';
 import type { StudioEnrollmentService } from '../src/modules/studio/studio-enrollment.service';
@@ -104,6 +105,7 @@ function buildService(input: { enabled: boolean; env?: Partial<AppEnv> }) {
     {} as unknown as OrdersService,
     {} as unknown as WechatPayService,
     {} as unknown as CofounderPayService,
+    {} as unknown as CofounderSettingsService,
     {} as unknown as CofounderEnrollmentService,
     {} as unknown as StudioEnrollmentService,
     {} as unknown as OpsTeamEnrollmentService,

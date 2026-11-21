@@ -23,7 +23,11 @@ import { UsersService } from '../users/users.service';
 import { ROOT_INVITE_CODE } from '../users/identity.constants';
 import { CofounderPayService } from '../cofounder/cofounder-pay.service';
 import { CofounderEnrollmentService } from '../cofounder/cofounder-enrollment.service';
-import { COFOUNDER_STATUS_ACTIVE } from '../cofounder/cofounder.constants';
+import { CofounderSettingsService } from '../cofounder/cofounder-settings.service';
+import {
+  COFOUNDER_STATUS_ACTIVE,
+  PAYOUT_PERIODIC,
+} from '../cofounder/cofounder.constants';
 import { OpsTeamEnrollmentService } from '../ops-team/ops-team-enrollment.service';
 import { OPS_TEAM_STATUS_ACTIVE } from '../ops-team/ops-team.constants';
 import { StudioEnrollmentService } from '../studio/studio-enrollment.service';
@@ -52,16 +56,7 @@ const WALLET_CONSUMPTION = 'consumption';
 const ROLE_COFOUNDER = 'cofounder';
 const ROLE_STUDIO = 'studio';
 
-/**
- * 一天里各跑一次到期任务的时点。
- * 业务定时点（报单检查、红包结算、联合创始人分配、职位发放）都落在日内，
- * 每天跑这几档就能按业务日逐格补齐，不会把多天的分红挤到最后一次算。
- */
-const ADVANCE_SLOTS: { hour: number; minute: number }[] = [
-  { hour: 0, minute: 1 },
-  { hour: 12, minute: 0 },
-  { hour: 23, minute: 59 },
-];
+const CLOCK_TIME_PATTERN = /^([01]\d|2[0-3]):([0-5]\d)$/;
 
 const MAX_ADVANCE_DAYS = 180;
 
@@ -126,6 +121,7 @@ export class SimulationService {
     private readonly orders: OrdersService,
     private readonly wechat: WechatPayService,
     private readonly cofounderPay: CofounderPayService,
+    private readonly cofounderSettings: CofounderSettingsService,
     private readonly cofounders: CofounderEnrollmentService,
     private readonly studios: StudioEnrollmentService,
     private readonly opsTeam: OpsTeamEnrollmentService,
@@ -242,9 +238,13 @@ export class SimulationService {
   }
 
   /**
-   * 逐业务日推进。从当前仿真时刻到目标时刻，每天按 ADVANCE_SLOTS 各跑一次到期任务：
-   * 跨日自动报单/公排、跨月核算与分红发放都按各自的业务日执行，而不是被最后一次推进一次性补算。
-   * 只能往后推进。
+   * 逐业务日推进。从当前仿真时刻到目标时刻，每天在各任务的计划钟点各跑一次到期任务：
+   * 报单检查与红包结算用 env 配置的每日报单钟点，联合创始人定期分配用管理端配置的
+   * 钟点，按业务日判定的任务在 23:59 兜底——钟点与真实环境一致，任务记录的时间戳
+   * 就是它的计划时刻。每次档位执行完后，仿真时钟前进「模拟任务耗时」（见
+   * SIMULATION_TASK_DURATION_MINUTES），体现真实环境里任务占用的时间；若耗时压到了
+   * 下一档位，下一档顺延执行。终点兜底一次（若目标时刻落在任务耗时区间内，时钟会
+   * 停在任务结束后）。只能往后推进。
    */
   async advance(input: { to: string }): Promise<{
     status: SimulationStatus;
@@ -270,38 +270,69 @@ export class SimulationService {
       throw new BadRequestException(`单次最多推进 ${MAX_ADVANCE_DAYS} 天`);
     }
 
+    const durationMs = this.env.simulationTaskDurationMinutes * 60_000;
+    const slots = await this.collectDailySlotTimes();
     const before = await this.snapshot();
     let steps = 0;
+    // 上一档位「任务执行结束」的时刻；后续档位若被压到，从这个时刻起跑。
+    let lastEnd = from.getTime();
     let cursor = startOfShanghaiDay(from);
     const lastDay = startOfShanghaiDay(target).getTime();
     while (cursor.getTime() <= lastDay) {
       const bizDate = shanghaiBizDate(cursor);
-      for (const slot of ADVANCE_SLOTS) {
+      for (const slot of slots) {
         const instant = shanghaiAt(bizDate, slot.hour, slot.minute);
         if (instant.getTime() <= from.getTime() || instant.getTime() > target.getTime()) {
           continue;
         }
-        await this.clock.setOverride(instant.toISOString());
+        const startAt = Math.max(instant.getTime(), lastEnd);
+        await this.clock.setOverride(this.clock.instant(startAt).toISOString());
         await this.runner.runDue();
         steps += 1;
+        lastEnd = Math.max(lastEnd, instant.getTime() + durationMs);
       }
       cursor = addShanghaiDays(cursor, 1);
     }
     // 目标时刻本身再跑一次，覆盖落在非整点的定时策略。
-    await this.clock.setOverride(target.toISOString());
+    const finalAt = Math.max(target.getTime(), lastEnd);
+    await this.clock.setOverride(this.clock.instant(finalAt).toISOString());
     await this.runner.runDue();
     steps += 1;
 
     const diff = diffOf(before, await this.snapshot());
     const event = await this.append(
       'advance',
-      { from: view.override, to: target.toISOString(), steps },
+      { from: view.override, to: this.clock.instant(finalAt).toISOString(), steps },
       diff,
     );
     this.logger.log(
-      `simulation advanced ${view.override} -> ${target.toISOString()} (${steps} steps)`,
+      `simulation advanced ${view.override} -> ${this.clock.instant(finalAt).toISOString()} (${steps} steps)`,
     );
     return { status: await this.status(), event, steps };
+  }
+
+  /**
+   * 一天里要跑到期任务的计划钟点，按时刻升序。与真实环境的调度配置一致：
+   * - 报单检查与红包结算共用 env 的每日报单钟点（filingDailyCheckTime）；
+   * - 联合创始人定期分配用管理端配置的发放钟点（周期不是每日时，非到期日
+   *   会由服务内部判定跳过，不会误触发）；
+   * - 23:59 是按业务日判定的任务的兜底档位。
+   */
+  private async collectDailySlotTimes(): Promise<{ hour: number; minute: number }[]> {
+    const times = new Set<string>([this.env.locked.filingDailyCheckTime, '23:59']);
+    const settings = await this.cofounderSettings.get();
+    if (settings.payoutMode === PAYOUT_PERIODIC && CLOCK_TIME_PATTERN.test(settings.schedule.time)) {
+      times.add(settings.schedule.time);
+    }
+    const slots: { hour: number; minute: number }[] = [];
+    for (const time of times) {
+      const match = CLOCK_TIME_PATTERN.exec(time);
+      if (match) {
+        slots.push({ hour: Number(match[1]), minute: Number(match[2]) });
+      }
+    }
+    slots.sort((left, right) => left.hour * 60 + left.minute - (right.hour * 60 + right.minute));
+    return slots;
   }
 
   /**

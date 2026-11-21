@@ -5,13 +5,14 @@ import type { PrismaService } from '../src/common/prisma/prisma.service';
 import type { AppEnv } from '../src/config/app-env';
 import { DueJobRunner } from '../src/jobs/due-job.runner';
 import { SimulationService } from '../src/modules/simulation/simulation.service';
+import { COFOUNDER_SETTINGS_KEY } from '../src/modules/cofounder/cofounder.constants';
 import type { SimulationEvent, SimulationStore } from '../src/modules/simulation/simulation.types';
 import type { CofounderPayService } from '../src/modules/cofounder/cofounder-pay.service';
 import type { CofounderEnrollmentService } from '../src/modules/cofounder/cofounder-enrollment.service';
 import type { OpsTeamEnrollmentService } from '../src/modules/ops-team/ops-team-enrollment.service';
 import type { StudioEnrollmentService } from '../src/modules/studio/studio-enrollment.service';
 import type { MutableClock } from './support/stage1-harness';
-import { buildStage4 } from './support/stage4-harness';
+import { buildStage4, stage4Locked } from './support/stage4-harness';
 
 class MemoryStore implements SimulationStore {
   events: SimulationEvent[] = [];
@@ -56,7 +57,7 @@ function withOverride(clock: MutableClock): MutableClock {
   return clock;
 }
 
-function buildSimulation(enabled: boolean) {
+function buildSimulation(enabled: boolean, overrides: Partial<AppEnv> = {}) {
   const stage = buildStage4();
   const clock = withOverride(stage.clock);
   const runnerCalls: string[] = [];
@@ -65,7 +66,12 @@ function buildSimulation(enabled: boolean) {
       runnerCalls.push((await clock.now()).toISOString());
     },
   } as unknown as DueJobRunner;
-  const env: AppEnv = { ...stage.env, simulationEnabled: enabled, allowClockOverride: true };
+  const env: AppEnv = {
+    ...stage.env,
+    ...overrides,
+    simulationEnabled: enabled,
+    allowClockOverride: true,
+  };
   const service = new SimulationService(
     clock as unknown as ClockService,
     runner,
@@ -74,6 +80,7 @@ function buildSimulation(enabled: boolean) {
     stage.orders,
     stage.wechatPay,
     {} as unknown as CofounderPayService,
+    stage.cofounderSettings,
     {} as unknown as CofounderEnrollmentService,
     {} as unknown as StudioEnrollmentService,
     {} as unknown as OpsTeamEnrollmentService,
@@ -357,22 +364,84 @@ describe('simulation actions', () => {
     );
   });
 
-  it('advances day by day and runs jobs at every business slot', async () => {
+  it('advances day by day at configured clock times, with task duration shown', async () => {
     const { stage, service, runnerCalls } = buildSimulation(true);
     await stage.users.onModuleInit();
     await service.setClock('2026-01-02T05:00:00.000Z');
 
     const advanced = await service.advance({ to: '2026-01-04T05:00:00.000Z' });
 
-    // 1/2 23:59、1/3 三个时点、1/4 00:01 与 12:00，加上目标时刻本身。
-    expect(advanced.steps).toBeGreaterThanOrEqual(6);
+    // 档位 = 报单钟点 00:01 + 日末 23:59（联创默认即时发放，无额外档位）。
+    // 1/2 23:59；1/3 00:01（被 1/2 23:59+5min 压到 00:04）、23:59；1/4 00:01（压到 00:04）；
+    // 加目标时刻兜底，共 5 次。
+    expect(advanced.steps).toBe(5);
     expect(runnerCalls).toHaveLength(advanced.steps);
     const sorted = [...runnerCalls].sort();
     expect(runnerCalls).toEqual(sorted);
     expect(runnerCalls[0]).toBe('2026-01-02T15:59:00.000Z');
+    // 1/3 00:01 档被上一档的模拟耗时（5 分钟）顺延到 00:04 开始。
+    expect(runnerCalls[1]).toBe('2026-01-02T16:04:00.000Z');
     expect(runnerCalls[runnerCalls.length - 1]).toBe('2026-01-04T05:00:00.000Z');
     const status = await service.status();
     expect(status.clock.override).toBe('2026-01-04T05:00:00.000Z');
+  });
+
+  it('runs daily jobs at the configured clock time, not hardcoded slots', async () => {
+    const { stage, service, runnerCalls } = buildSimulation(true, {
+      locked: { ...stage4Locked(), filingDailyCheckTime: '02:30' },
+      simulationTaskDurationMinutes: 10,
+    });
+    await stage.users.onModuleInit();
+    await service.setClock('2026-01-02T05:00:00.000Z');
+
+    await service.advance({ to: '2026-01-03T05:00:00.000Z' });
+
+    // 报单钟点改成 02:30 后，档位就在 02:30（上海）执行；每次执行后时钟前进 10 分钟。
+    expect(runnerCalls).toEqual([
+      '2026-01-02T15:59:00.000Z',
+      '2026-01-02T18:30:00.000Z',
+      '2026-01-03T05:00:00.000Z',
+    ]);
+  });
+
+  it('adds the cofounder payout clock as a daily slot', async () => {
+    const { stage, service, runnerCalls } = buildSimulation(true);
+    await stage.users.onModuleInit();
+    // 直接写联创配置行：每日 10:00 定期发放。
+    await stage.db.adminSetting.create({
+      data: {
+        settingKey: COFOUNDER_SETTINGS_KEY,
+        settingValue: JSON.stringify({
+          seatCap: 100,
+          userButtonOpen: false,
+          activationAmountFen: '0',
+          payoutMode: 'periodic',
+          schedule: {
+            cycle: 'daily',
+            time: '10:00',
+            weekday: 1,
+            monthDay: 1,
+            intervalDays: 1,
+            anchorDate: '2026-01-01',
+          },
+          poolThresholdFen: '0',
+          perPersonThresholdFen: '0',
+        }),
+        updatedAt: new Date(),
+        updatedByAdminId: 1n,
+      },
+    });
+    await service.setClock('2026-01-02T05:00:00.000Z');
+
+    await service.advance({ to: '2026-01-03T05:00:00.000Z' });
+
+    // 联创每日 10:00（上海）= 02:00Z 成为一个档位；1/3 00:01 被 1/2 23:59+5min 顺延。
+    expect(runnerCalls).toEqual([
+      '2026-01-02T15:59:00.000Z',
+      '2026-01-02T16:04:00.000Z',
+      '2026-01-03T02:00:00.000Z',
+      '2026-01-03T05:00:00.000Z',
+    ]);
   });
 
   it('rejects backward time and requires a clock start', async () => {

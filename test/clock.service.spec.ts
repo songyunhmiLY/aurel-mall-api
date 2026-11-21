@@ -14,6 +14,7 @@ function env(allowClockOverride: boolean): AppEnv {
     allowClockOverride,
     allowPreviewAuth: false,
     simulationEnabled: false,
+    simulationTaskDurationMinutes: 5,
     orderPaymentTimeoutMinutes: 15,
     adminJwtSecret: 'test-secret-admin',
     wechatMiniAppId: null,
