@@ -468,7 +468,8 @@ export class SimulationService {
     }
     let didReset = false;
     if (input.reset ?? true) {
-      await this.resetData();
+      // 造树要落在当前仿真时刻上，不能顺手把时钟拉回真实时间。
+      await this.resetData({ keepClock: true });
       didReset = true;
     }
     const root = await this.resolveInviter(undefined);
@@ -636,18 +637,27 @@ export class SimulationService {
     return { events: await this.store.list() };
   }
 
-  /** 只清时间轴，不动业务数据。 */
+  /**
+   * 只清时间轴，不动业务数据。清完就当从未仿真过：仿真时钟覆盖一并清掉，
+   * 下次推进从真实时间重新起算。
+   */
   async reset(): Promise<{ status: SimulationStatus }> {
     this.assertEnabled();
     await this.store.clear();
+    await this.clearSimulatedClock();
     return { status: await this.status() };
   }
 
   /**
    * 清空业务数据，保留商品、内容、管理员与系统配置。
    * 根账户及其席位保留，否则新用户没有可挂靠的邀请人。
+   * 默认同时把仿真时钟拉回真实时间（重置后重新从「现在」开始演练）；
+   * seedTree 内部复用本方法时传 keepClock，避免把时钟倒回真实时间。
    */
-  async resetData(): Promise<{ removedUsers: number }> {
+  async resetData(input: { keepClock?: boolean } = {}): Promise<{
+    removedUsers: number;
+    status: SimulationStatus;
+  }> {
     this.assertEnabled();
     const root = await this.prisma.user.findFirst({ where: { inviteCode: ROOT_INVITE_CODE } });
     if (!root) {
@@ -721,9 +731,20 @@ export class SimulationService {
       { timeout: 120_000, maxWait: 10_000 },
     );
     await this.rebuildSeatSlots();
+    if (!input.keepClock) {
+      await this.clearSimulatedClock();
+    }
     await this.append('reset_data', { created: removedUsers });
     this.logger.warn(`simulation business data reset, removed ${removedUsers} users`);
-    return { removedUsers };
+    return { removedUsers, status: await this.status() };
+  }
+
+  /** 清掉仿真时钟覆盖，让业务时间回到真实时间；未启用覆盖时不做任何事。 */
+  private async clearSimulatedClock(): Promise<void> {
+    const view = await this.clock.readOverride();
+    if (view.source === 'override') {
+      await this.clock.clearOverride();
+    }
   }
 
   /** 双保险：env 开关（SIMULATION_ENABLED）关闭时一切仿真操作都拒绝。 */

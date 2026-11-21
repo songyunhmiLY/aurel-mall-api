@@ -102,6 +102,19 @@ describe('simulation actions', () => {
     await expect(service.resetData()).rejects.toBeInstanceOf(ForbiddenException);
   });
 
+  it('clears the simulated clock when the timeline is reset', async () => {
+    const { stage, service } = buildSimulation(true);
+    await stage.users.onModuleInit();
+    await service.setClock('2026-01-10T00:00:00.000Z');
+
+    const result = await service.reset();
+
+    expect(result.status.clock.source).toBe('real');
+    expect(result.status.clock.override).toBeNull();
+    const status = await service.status();
+    expect(status.clock.override).toBeNull();
+  });
+
   it('registers a batch under the root inviter with rule-based nicknames and payment passwords', async () => {
     const { stage, service } = buildSimulation(true);
     await stage.users.onModuleInit();
