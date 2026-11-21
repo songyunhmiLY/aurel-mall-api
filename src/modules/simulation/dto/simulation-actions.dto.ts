@@ -1,35 +1,51 @@
 import {
   ArrayMaxSize,
   IsArray,
+  IsBoolean,
   IsIn,
   IsInt,
   IsISO8601,
   IsOptional,
-  IsString,
   Matches,
   Max,
-  MaxLength,
   Min,
 } from 'class-validator';
 
 const ID_PATTERN = /^\d+$/;
 
-/** 批量注册仿真用户。只挂在已有会员下面，默认挂根账户。 */
+/** 批量注册仿真用户。只挂在已有会员下面，默认挂根账户。昵称按演练命名规则自动生成。 */
 export class RegisterUsersDto {
   @IsInt()
   @Min(1)
   @Max(200)
   count!: number;
 
-  @IsOptional()
-  @IsString()
-  @MaxLength(16)
-  nicknamePrefix?: string;
-
   /** 邀请人（必须是会员）。不传用根账户。 */
   @IsOptional()
   @Matches(ID_PATTERN, { message: '邀请人编号不正确' })
   inviterUserId?: string;
+}
+
+/** 生成演示市场树。默认 3+9+27 三层满树，先重置业务数据；每层节点数可自定义。 */
+export class SeedTreeDto {
+  /** 每层节点数，按层序落座。缺省 [3, 9, 27]。 */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(4)
+  @IsInt({ each: true })
+  @Min(1, { each: true })
+  @Max(27, { each: true })
+  layers?: number[];
+
+  /** 生成前是否先清空业务数据。默认 true。 */
+  @IsOptional()
+  @IsBoolean()
+  reset?: boolean;
+
+  /** 创业专区商品。不传取第一个上架商品。 */
+  @IsOptional()
+  @Matches(ID_PATTERN, { message: '商品编号不正确' })
+  productId?: string;
 }
 
 /** 批量购买创业专区商品。不指定用户时从已注册用户里随机取。 */

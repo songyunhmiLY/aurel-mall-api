@@ -7,6 +7,7 @@ import { SetClockOverrideDto } from '../../common/clock/dto/set-clock-override.d
 import {
   AdvanceSimulationDto,
   RegisterUsersDto,
+  SeedTreeDto,
   SimulatePurchaseDto,
   SimulateRoleDto,
 } from './dto/simulation-actions.dto';
@@ -73,6 +74,13 @@ export class SimulationController {
   @HttpCode(200)
   purchase(@Body() body: SimulatePurchaseDto) {
     return this.simulation.purchaseBatch(body);
+  }
+
+  /** 生成演示市场树：默认清空后重建 3+9+27 三层满树，昵称按演练命名规则回填。 */
+  @Post('seed-tree')
+  @HttpCode(200)
+  seedTree(@Body() body: SeedTreeDto) {
+    return this.simulation.seedTree(body);
   }
 
   @Post('role')

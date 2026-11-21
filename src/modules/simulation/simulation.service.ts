@@ -13,6 +13,7 @@ import {
   shanghaiBizDate,
   startOfShanghaiDay,
 } from '../../common/clock/shanghai-calendar';
+import { hashPassword } from '../../common/auth/password-hasher';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import type { AppEnv } from '../../config/app-env';
 import { APP_ENV } from '../../config/tokens';
@@ -63,6 +64,18 @@ const ADVANCE_SLOTS: { hour: number; minute: number }[] = [
 ];
 
 const MAX_ADVANCE_DAYS = 180;
+
+/** 演练用户统一支付密码：消费划转、提现等资金操作校验用。 */
+const SEED_PAYMENT_PASSWORD = '123456';
+
+/** 市场树位次字母：槽位 1/2/3 = 左/中/右 = A/B/C。 */
+const SLOT_LETTERS = ['A', 'B', 'C'] as const;
+
+/** 演练命名规则：L{层}·{路径}·父{父路径}·邀{邀请人路径}，第二段是树路径。 */
+const TREE_NICKNAME_PATTERN = /^L\d+·([A-Za-z]+)·/;
+
+/** 单次生成演示树的节点上限。 */
+const MAX_SEED_NODES = 100;
 const MAX_BATCH_USERS = 200;
 
 let eventSeq = 0;
@@ -285,7 +298,9 @@ export class SimulationService {
       { from: view.override, to: target.toISOString(), steps },
       diff,
     );
-    this.logger.log(`simulation advanced ${view.override} -> ${target.toISOString()} (${steps} steps)`);
+    this.logger.log(
+      `simulation advanced ${view.override} -> ${target.toISOString()} (${steps} steps)`,
+    );
     return { status: await this.status(), event, steps };
   }
 
@@ -293,18 +308,26 @@ export class SimulationService {
    * 批量注册。用户是真实 users 行，挂了邀请关系，能直接下单。
    * 邀请人必须是已有会员（默认根账户）：只有会员才有邀请码。
    */
-  async registerBatch(input: {
-    count: number;
-    nicknamePrefix?: string;
-    inviterUserId?: string;
-  }): Promise<{ created: { id: string; nickname: string }[]; inviterId: string }> {
+  /**
+   * 批量注册仿真用户，昵称按演练命名规则生成：
+   * `L{层}·{邀请路径}{序号}·邀{邀请人路径}`，序号是 26 进制小写 a、b、…、z、aa…。
+   * 路径大写字母段是种子市场树（A/B/C = 左/中/右），小写段是这里延伸出的邀请谱系。
+   * 每个用户都带上统一支付密码（SEED_PAYMENT_PASSWORD），演练资金操作不用逐个设置。
+   */
+  async registerBatch(input: { count: number; inviterUserId?: string }): Promise<{
+    created: { id: string; nickname: string; invitePath: string }[];
+    inviterId: string;
+    inviterPath: string;
+  }> {
     this.assertEnabled();
     const inviter = await this.resolveInviter(input.inviterUserId);
-    const prefix = (input.nicknamePrefix ?? '仿真用户').trim() || '仿真用户';
-    const created: { id: string; nickname: string }[] = [];
+    const payHash = await hashPassword(SEED_PAYMENT_PASSWORD);
+    const { prefix, self: inviterPath, childLayer } = inviterNaming(inviter);
+    const created: { id: string; nickname: string; invitePath: string }[] = [];
     for (let index = 0; index < input.count; index += 1) {
       const now = await this.clock.now();
-      const nickname = `${prefix}${String(created.length + 1).padStart(3, '0')}`;
+      const invitePath = `${prefix}${childLetters(index)}`;
+      const nickname = `L${childLayer}·${invitePath}·邀${inviterPath}`;
       const user = await this.prisma.$transaction(async (tx) => {
         const row = await tx.user.create({
           data: {
@@ -328,13 +351,16 @@ export class SimulationService {
             createdAt: now,
           },
         });
+        await tx.userPaymentPassword.create({
+          data: { userId: row.id, passwordHash: payHash, updatedAt: now },
+        });
         return row;
       });
       await this.users.bindInviter(user.id, inviter.inviteCode as string);
-      created.push({ id: user.id.toString(), nickname: user.nickname });
+      created.push({ id: user.id.toString(), nickname: user.nickname, invitePath });
     }
     await this.append('register', { created: created.length });
-    return { created, inviterId: inviter.id.toString() };
+    return { created, inviterId: inviter.id.toString(), inviterPath };
   }
 
   /**
@@ -347,7 +373,10 @@ export class SimulationService {
     productId?: string;
     quantityMin?: number;
     quantityMax?: number;
-  }): Promise<{ product: { id: string; name: string; priceFen: number }; results: SimulatedPurchaseResult[] }> {
+  }): Promise<{
+    product: { id: string; name: string; priceFen: number };
+    results: SimulatedPurchaseResult[];
+  }> {
     this.assertEnabled();
     const product = await this.resolveStartupProduct(input.productId);
     const min = input.quantityMin ?? 1;
@@ -364,6 +393,146 @@ export class SimulationService {
     return {
       product: { id: product.id.toString(), name: product.name, priceFen: product.priceFen },
       results,
+    };
+  }
+
+  /**
+   * 生成演示市场树，默认 3+9+27 三层满树。
+   *
+   * 全部挂在根账户下：入座规则是「落在邀请人子树的最浅空位」，根满之后自动
+   * 逐层往深处落座，所以树形必然是层序满树；而邀请人全部是根——正好演示
+   * 「邀请关系 ≠ 树上级」。
+   *
+   * 落座后按实际席位回填昵称：`L{层}·{路径}·父{父路径}·邀R`。
+   * 路径字母 A/B/C = 左/中/右，根 = R，层级 = 路径长度。
+   * 每人统一支付密码 SEED_PAYMENT_PASSWORD，走真实下单、支付、报单与入座。
+   */
+  async seedTree(input: { layers?: number[]; reset?: boolean; productId?: string }): Promise<{
+    reset: boolean;
+    layers: number[];
+    product: { id: string; name: string };
+    created: SeededTreeNode[];
+  }> {
+    this.assertEnabled();
+    const layers = input.layers ?? [3, 9, 27];
+    if (layers.length < 1 || layers.length > 4) {
+      throw new BadRequestException('层数必须是 1 到 4');
+    }
+    for (const count of layers) {
+      if (!Number.isInteger(count) || count < 1 || count > 27) {
+        throw new BadRequestException('每层节点数必须是 1 到 27');
+      }
+    }
+    const total = layers.reduce((sum, count) => sum + count, 0);
+    if (total > MAX_SEED_NODES) {
+      throw new BadRequestException(`单次最多生成 ${MAX_SEED_NODES} 个节点`);
+    }
+    let didReset = false;
+    if (input.reset ?? true) {
+      await this.resetData();
+      didReset = true;
+    }
+    const root = await this.resolveInviter(undefined);
+    const product = await this.resolveStartupProduct(input.productId);
+    const payHash = await hashPassword(SEED_PAYMENT_PASSWORD);
+    const lettersByUserId = new Map<string, string>([[root.id.toString(), 'R']]);
+    const created: SeededTreeNode[] = [];
+    let order = 0;
+    for (const layerCount of layers) {
+      for (let index = 0; index < layerCount; index += 1) {
+        order += 1;
+        const provisional = `种子${String(order).padStart(3, '0')}`;
+        const now = await this.clock.now();
+        const user = await this.prisma.$transaction(async (tx) => {
+          const row = await tx.user.create({
+            data: {
+              status: 'active',
+              nickname: provisional,
+              avatarUrl: null,
+              phone: null,
+              inviteCode: null,
+              member: false,
+              seated: false,
+              createdAt: now,
+              updatedAt: now,
+            },
+          });
+          await tx.userIdentity.create({
+            data: {
+              userId: row.id,
+              provider: IDENTITY_PROVIDERS.simulation,
+              identifier: `sim-${row.id.toString()}`,
+              unionId: null,
+              createdAt: now,
+            },
+          });
+          await tx.userPaymentPassword.create({
+            data: { userId: row.id, passwordHash: payHash, updatedAt: now },
+          });
+          return row;
+        });
+        await this.users.bindInviter(user.id, root.inviteCode as string);
+        const bought = await this.purchaseOne(
+          { id: user.id, nickname: provisional },
+          product.id,
+          1,
+          1,
+        );
+        const node = await this.prisma.marketTreeNode.findUnique({ where: { userId: user.id } });
+        if (
+          !node ||
+          !bought.ok ||
+          node.parentUserId === null ||
+          node.slot === null ||
+          node.depth === null
+        ) {
+          created.push({
+            userId: user.id.toString(),
+            nickname: provisional,
+            treePath: '',
+            parentPath: '',
+            slot: 0,
+            layer: 0,
+            invitedBy: 'R',
+            orderNo: bought.orderNo,
+            ok: false,
+          });
+          continue;
+        }
+        const parentLetters = lettersByUserId.get(node.parentUserId.toString()) ?? 'R';
+        const slotLetter = SLOT_LETTERS[node.slot - 1] ?? '?';
+        const treePath = parentLetters === 'R' ? slotLetter : `${parentLetters}${slotLetter}`;
+        lettersByUserId.set(user.id.toString(), treePath);
+        const layer = node.depth;
+        const parentPath = parentLetters;
+        const nickname = `L${layer}·${treePath}·父${parentPath}·邀R`;
+        const updated = await this.prisma.user.update({
+          where: { id: user.id },
+          data: { nickname },
+        });
+        await this.prisma.userAddress.updateMany({
+          where: { userId: user.id, contactName: provisional },
+          data: { contactName: nickname },
+        });
+        created.push({
+          userId: user.id.toString(),
+          nickname: updated.nickname,
+          treePath,
+          parentPath,
+          slot: node.slot,
+          layer,
+          invitedBy: 'R',
+          orderNo: bought.orderNo,
+          ok: true,
+        });
+      }
+    }
+    await this.append('seed_tree', { created: created.filter((item) => item.ok).length });
+    return {
+      reset: didReset,
+      layers,
+      product: { id: product.id.toString(), name: product.name },
+      created,
     };
   }
 
@@ -534,19 +703,19 @@ export class SimulationService {
 
   private async resolveInviter(
     inviterUserId: string | undefined,
-  ): Promise<{ id: bigint; inviteCode: string | null }> {
+  ): Promise<{ id: bigint; inviteCode: string | null; nickname: string }> {
     if (inviterUserId !== undefined) {
       const inviter = await this.prisma.user.findUnique({ where: { id: BigInt(inviterUserId) } });
       if (!inviter || !inviter.member || !inviter.inviteCode) {
         throw new BadRequestException('邀请人必须是已有邀请码的会员');
       }
-      return { id: inviter.id, inviteCode: inviter.inviteCode };
+      return { id: inviter.id, inviteCode: inviter.inviteCode, nickname: inviter.nickname };
     }
     const root = await this.prisma.user.findFirst({ where: { inviteCode: ROOT_INVITE_CODE } });
     if (!root) {
       throw new BadRequestException('根账户不存在');
     }
-    return { id: root.id, inviteCode: root.inviteCode };
+    return { id: root.id, inviteCode: root.inviteCode, nickname: root.nickname };
   }
 
   private async resolveStartupProduct(productId: string | undefined): Promise<{
@@ -613,7 +782,9 @@ export class SimulationService {
     if (pool.length === 0) {
       throw new BadRequestException('还没有已入座的会员，请先注册并下单');
     }
-    const shuffled = [...pool].sort(() => Math.random() - 0.5).slice(0, Math.min(count, pool.length));
+    const shuffled = [...pool]
+      .sort(() => Math.random() - 0.5)
+      .slice(0, Math.min(count, pool.length));
     return shuffled.map((row) => ({ id: row.id, nickname: row.nickname }));
   }
 
@@ -801,4 +972,49 @@ function diffOf(before: SimulationSnapshot, after: SimulationSnapshot): Simulati
       pendingCompensations: after.counts.pendingCompensations - before.counts.pendingCompensations,
     },
   };
+}
+
+/** seedTree 返回的每个节点：按实际席位回填的树路径与昵称。 */
+export interface SeededTreeNode {
+  userId: string;
+  nickname: string;
+  /** 市场树路径（A/B/C=左/中/右）。空串表示没入座。 */
+  treePath: string;
+  parentPath: string;
+  slot: number;
+  layer: number;
+  invitedBy: string;
+  orderNo: string | null;
+  ok: boolean;
+}
+
+/**
+ * 批量注册的邀请谱系序号：a、b、…、z、aa、ab…（26 进制小写）。
+ * 大写字母段留给种子市场树路径，小写段表示从邀请人延伸出来的谱系。
+ */
+function childLetters(index: number): string {
+  let rest = index;
+  let text = '';
+  do {
+    text = String.fromCharCode(97 + (rest % 26)) + text;
+    rest = Math.floor(rest / 26) - 1;
+  } while (rest >= 0);
+  return text;
+}
+
+/**
+ * 从邀请人推出批量注册的命名参数。
+ * 根账户的前缀是空串（它的孩子路径直接是 a、b、c…，层 1）；
+ * 其他会员从昵称里取树路径（L{层}·{路径}·… 的第二段），取不到就用邀请码。
+ */
+function inviterNaming(inviter: { inviteCode: string | null; nickname: string }): {
+  prefix: string;
+  self: string;
+  childLayer: number;
+} {
+  if (inviter.inviteCode === ROOT_INVITE_CODE) {
+    return { prefix: '', self: 'R', childLayer: 1 };
+  }
+  const token = TREE_NICKNAME_PATTERN.exec(inviter.nickname)?.[1] ?? inviter.inviteCode ?? '';
+  return { prefix: token, self: token, childLayer: token.length + 1 };
 }

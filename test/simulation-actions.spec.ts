@@ -1,5 +1,6 @@
 import { ForbiddenException } from '@nestjs/common';
 import type { ClockService } from '../src/common/clock/clock.service';
+import { verifyPassword } from '../src/common/auth/password-hasher';
 import type { PrismaService } from '../src/common/prisma/prisma.service';
 import type { AppEnv } from '../src/config/app-env';
 import { DueJobRunner } from '../src/jobs/due-job.runner';
@@ -94,29 +95,64 @@ describe('simulation actions', () => {
     await expect(service.resetData()).rejects.toBeInstanceOf(ForbiddenException);
   });
 
-  it('registers a batch under the root inviter', async () => {
+  it('registers a batch under the root inviter with rule-based nicknames and payment passwords', async () => {
     const { stage, service } = buildSimulation(true);
     await stage.users.onModuleInit();
     const rootId = stage.db.user.rows.find((row) => row.inviteCode === '000000')!.id;
     const before = stage.db.user.rows.length;
 
-    const created = await service.registerBatch({ count: 3, nicknamePrefix: '演练' });
+    const created = await service.registerBatch({ count: 3 });
 
-    expect(created.created).toHaveLength(3);
     expect(created.inviterId).toBe(rootId.toString());
+    expect(created.inviterPath).toBe('R');
+    expect(created.created.map((item) => item.nickname)).toEqual([
+      'L1·a·邀R',
+      'L1·b·邀R',
+      'L1·c·邀R',
+    ]);
     expect(stage.db.user.rows).toHaveLength(before + 3);
-    const nicknames = stage.db.user.rows.map((row) => row.nickname as string);
-    expect(nicknames).toEqual(expect.arrayContaining(['演练001', '演练002', '演练003']));
-    const invites = stage.db.inviteTreeNode.rows.filter(
-      (row) => row.parentUserId === rootId,
-    );
+    const invites = stage.db.inviteTreeNode.rows.filter((row) => row.parentUserId === rootId);
     expect(invites).toHaveLength(3);
-    const freshest = stage.db.user.rows.find((row) => row.nickname === '演练001');
-    expect(freshest?.member).toBe(false);
     const simulationIdentities = stage.db.userIdentity.rows.filter(
       (row) => row.provider === 'simulation',
     );
     expect(simulationIdentities).toHaveLength(3);
+    const paymentRows = stage.db.userPaymentPassword.rows;
+    expect(paymentRows).toHaveLength(3);
+    const hashed = paymentRows[0]!.passwordHash as string;
+    expect(await verifyPassword(hashed, '123456')).toBe(true);
+  });
+
+  it('names batch registrations after the inviter tree path', async () => {
+    const { stage, service } = buildSimulation(true);
+    await stage.users.onModuleInit();
+    const product = await stage.catalog.create({
+      zone: 'startup',
+      name: '创业礼包',
+      freightFen: 0,
+      stockQuantity: 999,
+      status: 'on',
+    });
+
+    // 邀请人必须是会员：先注册并购买入座，再改成带树路径的昵称（L2·BA = B 下左位）。
+    const first = await service.registerBatch({ count: 1 });
+    await service.purchaseBatch({
+      userIds: [first.created[0]!.id],
+      productId: product.product.id.toString(),
+    });
+    const inviterId = BigInt(first.created[0]!.id);
+    await stage.db.user.update({
+      where: { id: inviterId },
+      data: { nickname: 'L2·BA·父B·邀R' },
+    });
+
+    const created = await service.registerBatch({ count: 2, inviterUserId: inviterId.toString() });
+
+    expect(created.inviterPath).toBe('BA');
+    expect(created.created.map((item) => item.nickname)).toEqual(['L3·BAa·邀BA', 'L3·BAb·邀BA']);
+    expect(
+      stage.db.inviteTreeNode.rows.filter((row) => row.parentUserId === inviterId),
+    ).toHaveLength(2);
   });
 
   it('buys for selected users: real orders, seats, and filing', async () => {
@@ -157,6 +193,73 @@ describe('simulation actions', () => {
     expect(stage.db.startupSubOrder.rows).toHaveLength(4);
     expect(stage.db.filing.rows).toHaveLength(2);
     expect(stage.db.userAddress.rows).toHaveLength(2);
+  });
+
+  it('seeds a full 3-9-27 tree with rule-based nicknames', async () => {
+    const { stage, service } = buildSimulation(true);
+    await stage.users.onModuleInit();
+    const product = await stage.catalog.create({
+      zone: 'startup',
+      name: '创业礼包',
+      freightFen: 0,
+      stockQuantity: 999,
+      status: 'on',
+    });
+    const usersBefore = stage.db.user.rows.length;
+
+    const result = await service.seedTree({
+      productId: product.product.id.toString(),
+      reset: false,
+    });
+
+    expect(result.layers).toEqual([3, 9, 27]);
+    expect(result.created).toHaveLength(39);
+    expect(result.created.every((item) => item.ok)).toBe(true);
+    expect(stage.db.user.rows).toHaveLength(usersBefore + 39);
+
+    // 每层节点数与层级命名。
+    for (const layer of [1, 2, 3]) {
+      const nodes = result.created.filter((item) => item.layer === layer);
+      expect(nodes).toHaveLength(3 ** layer);
+    }
+    expect(result.created.find((item) => item.treePath === 'A')?.nickname).toBe('L1·A·父R·邀R');
+    expect(result.created.find((item) => item.treePath === 'BA')?.nickname).toBe('L2·BA·父B·邀R');
+    expect(result.created.find((item) => item.treePath === 'ABC')?.nickname).toBe(
+      'L3·ABC·父AB·邀R',
+    );
+
+    // 树结构：每个非根节点的父路径 = 自己路径去掉最后一位；根恰好 3 个孩子。
+    const byId = new Map(stage.db.marketTreeNode.rows.map((row) => [row.userId, row]));
+    expect(byId.size).toBe(40);
+    for (const item of result.created) {
+      const node = byId.get(BigInt(item.userId))!;
+      expect(node.depth).toBe(item.layer);
+    }
+    const rootId = stage.db.user.rows.find((row) => row.inviteCode === '000000')!.id;
+    const rootChildren = [...byId.values()].filter((row) => row.parentUserId === rootId);
+    expect(rootChildren).toHaveLength(3);
+
+    // 邀请关系全部指向根账户：邀请 ≠ 树上级（除第一层）。
+    for (const item of result.created.filter((node) => node.layer > 1)) {
+      expect(item.invitedBy).toBe('R');
+      expect(item.parentPath).not.toBe('R');
+    }
+
+    // 支付密码统一 123456。
+    const paymentRows = stage.db.userPaymentPassword.rows;
+    expect(paymentRows).toHaveLength(39);
+    expect(await verifyPassword(paymentRows[0]!.passwordHash as string, '123456')).toBe(true);
+  });
+
+  it('refuses to seed more nodes than the cap and validates layer sizes', async () => {
+    const { service } = buildSimulation(true);
+    await expect(service.seedTree({ layers: [27, 27, 27, 27], reset: false })).rejects.toThrow(
+      '单次最多生成',
+    );
+    await expect(service.seedTree({ layers: [0], reset: false })).rejects.toThrow('每层节点数');
+    await expect(service.seedTree({ layers: [1, 2, 3, 4, 5], reset: false })).rejects.toThrow(
+      '层数',
+    );
   });
 
   it('advances day by day and runs jobs at every business slot', async () => {

@@ -8,6 +8,7 @@ export type SimulationAction =
   | 'register'
   | 'purchase'
   | 'role'
+  | 'seed_tree'
   | 'reset'
   | 'reset_data';
 
