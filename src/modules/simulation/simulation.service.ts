@@ -669,6 +669,12 @@ export class SimulationService {
         await tx.inviteTreeNode.deleteMany({ where: { userId: { not: root.id } } });
         await tx.marketTreeOpenSlot.deleteMany({});
         await tx.marketTreeNode.deleteMany({ where: { userId: { not: root.id } } });
+        // 根节点的 child_count 是历史残留（删光孩子后必须归零），否则重建空位时
+        // 按 3 - child_count 算出 0 个空位，之后所有入座全部失败。
+        await tx.marketTreeNode.update({
+          where: { userId: root.id },
+          data: { childCount: 0 },
+        });
         const removed = await tx.user.deleteMany({ where: { id: { not: root.id } } });
         return removed.count;
       },
@@ -690,6 +696,18 @@ export class SimulationService {
   private async rebuildSeatSlots(): Promise<void> {
     await this.prisma.$transaction(async (tx) => {
       await tx.marketTreeOpenSlot.deleteMany({});
+      // 以真实孩子数为准重算 child_count，不信任可能漂移的缓存值；
+      // 然后按 3 - 实际孩子数重建每个节点的空位行。
+      await tx.$executeRaw`
+        UPDATE market_tree_nodes AS node
+        LEFT JOIN (
+          SELECT parent_user_id, COUNT(*) AS cnt
+          FROM market_tree_nodes
+          WHERE parent_user_id IS NOT NULL
+          GROUP BY parent_user_id
+        ) AS child ON child.parent_user_id = node.user_id
+        SET node.child_count = COALESCE(child.cnt, 0)
+      `;
       await tx.$executeRaw`
         INSERT INTO market_tree_open_slots
           (parent_user_id, slot, parent_depth, parent_path, open_count)
