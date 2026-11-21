@@ -364,7 +364,7 @@ describe('simulation actions', () => {
     );
   });
 
-  it('advances day by day at configured clock times, with task duration shown', async () => {
+  it('advances day by day at configured clock times, ending at the target', async () => {
     const { stage, service, runnerCalls } = buildSimulation(true);
     await stage.users.onModuleInit();
     await service.setClock('2026-01-02T05:00:00.000Z');
@@ -372,15 +372,15 @@ describe('simulation actions', () => {
     const advanced = await service.advance({ to: '2026-01-04T05:00:00.000Z' });
 
     // 档位 = 报单钟点 00:01 + 日末 23:59（联创默认即时发放，无额外档位）。
-    // 1/2 23:59；1/3 00:01（被 1/2 23:59+5min 压到 00:04）、23:59；1/4 00:01（压到 00:04）；
-    // 加目标时刻兜底，共 5 次。
+    // 1/2 23:59；1/3 00:01、23:59；1/4 00:01；加目标时刻兜底，共 5 次。
+    // 任务的真实执行耗时（stub 为毫秒级）加到仿真时钟上，但远小于档位间隔，
+    // 不会把下一档顺延。
     expect(advanced.steps).toBe(5);
     expect(runnerCalls).toHaveLength(advanced.steps);
     const sorted = [...runnerCalls].sort();
     expect(runnerCalls).toEqual(sorted);
     expect(runnerCalls[0]).toBe('2026-01-02T15:59:00.000Z');
-    // 1/3 00:01 档被上一档的模拟耗时（5 分钟）顺延到 00:04 开始。
-    expect(runnerCalls[1]).toBe('2026-01-02T16:04:00.000Z');
+    expect(runnerCalls[1]).toBe('2026-01-02T16:01:00.000Z');
     expect(runnerCalls[runnerCalls.length - 1]).toBe('2026-01-04T05:00:00.000Z');
     const status = await service.status();
     expect(status.clock.override).toBe('2026-01-04T05:00:00.000Z');
@@ -389,14 +389,13 @@ describe('simulation actions', () => {
   it('runs daily jobs at the configured clock time, not hardcoded slots', async () => {
     const { stage, service, runnerCalls } = buildSimulation(true, {
       locked: { ...stage4Locked(), filingDailyCheckTime: '02:30' },
-      simulationTaskDurationMinutes: 10,
     });
     await stage.users.onModuleInit();
     await service.setClock('2026-01-02T05:00:00.000Z');
 
     await service.advance({ to: '2026-01-03T05:00:00.000Z' });
 
-    // 报单钟点改成 02:30 后，档位就在 02:30（上海）执行；每次执行后时钟前进 10 分钟。
+    // 报单钟点改成 02:30 后，档位就在 02:30（上海）执行；任务耗时只体现在档位后的时钟上。
     expect(runnerCalls).toEqual([
       '2026-01-02T15:59:00.000Z',
       '2026-01-02T18:30:00.000Z',
@@ -435,10 +434,10 @@ describe('simulation actions', () => {
 
     await service.advance({ to: '2026-01-03T05:00:00.000Z' });
 
-    // 联创每日 10:00（上海）= 02:00Z 成为一个档位；1/3 00:01 被 1/2 23:59+5min 顺延。
+    // 联创每日 10:00（上海）= 02:00Z 成为一个档位；任务耗时毫秒级，不改变后续档位时刻。
     expect(runnerCalls).toEqual([
       '2026-01-02T15:59:00.000Z',
-      '2026-01-02T16:04:00.000Z',
+      '2026-01-02T16:01:00.000Z',
       '2026-01-03T02:00:00.000Z',
       '2026-01-03T05:00:00.000Z',
     ]);

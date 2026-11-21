@@ -65,7 +65,6 @@ export function stage1Env(overrides: Partial<AppEnv> = {}): AppEnv {
     allowClockOverride: false,
     allowPreviewAuth: false,
     simulationEnabled: false,
-    simulationTaskDurationMinutes: 5,
     orderPaymentTimeoutMinutes: 15,
     adminJwtSecret: 'test-secret-admin',
     miniProgramTokenSecret: 'test-secret-mini',

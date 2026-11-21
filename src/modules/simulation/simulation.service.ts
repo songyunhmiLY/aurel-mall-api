@@ -238,13 +238,14 @@ export class SimulationService {
   }
 
   /**
-   * 逐业务日推进。从当前仿真时刻到目标时刻，每天在各任务的计划钟点各跑一次到期任务：
+   * 逐业务日推进。从当前仿真时刻到目标时刻，先收集这段区间内的全部计划档位
+   * （可能跨多天，每天多档），逐档把时钟推到档位时刻、跑一次到期任务，全部
+   * 档位完成后把仿真时钟（即下一次推进的起点）停在目标时刻：
    * 报单检查与红包结算用 env 配置的每日报单钟点，联合创始人定期分配用管理端配置的
    * 钟点，按业务日判定的任务在 23:59 兜底——钟点与真实环境一致，任务记录的时间戳
-   * 就是它的计划时刻。每次档位执行完后，仿真时钟前进「模拟任务耗时」（见
-   * SIMULATION_TASK_DURATION_MINUTES），体现真实环境里任务占用的时间；若耗时压到了
-   * 下一档位，下一档顺延执行。终点兜底一次（若目标时刻落在任务耗时区间内，时钟会
-   * 停在任务结束后）。只能往后推进。
+   * 就是它的计划时刻。任务执行本身按真实耗时计：runDue 的墙钟耗时（毫秒级）会
+   * 加到仿真时钟上，模拟真实环境里任务占用的时间；若耗时压到了下一档位，下一档
+   * 顺延执行。目标时刻本身再兜底跑一次，覆盖落在非整点的定时策略。只能往后推进。
    */
   async advance(input: { to: string }): Promise<{
     status: SimulationStatus;
@@ -270,7 +271,6 @@ export class SimulationService {
       throw new BadRequestException(`单次最多推进 ${MAX_ADVANCE_DAYS} 天`);
     }
 
-    const durationMs = this.env.simulationTaskDurationMinutes * 60_000;
     const slots = await this.collectDailySlotTimes();
     const before = await this.snapshot();
     let steps = 0;
@@ -287,13 +287,17 @@ export class SimulationService {
         }
         const startAt = Math.max(instant.getTime(), lastEnd);
         await this.clock.setOverride(this.clock.instant(startAt).toISOString());
+        const wallStart = performance.now();
         await this.runner.runDue();
+        // 任务的真实执行耗时（哪怕只有几毫秒）体现到仿真时钟上。
+        const elapsedMs = Math.round(performance.now() - wallStart);
+        lastEnd = Math.max(lastEnd, startAt + elapsedMs);
+        await this.clock.setOverride(this.clock.instant(lastEnd).toISOString());
         steps += 1;
-        lastEnd = Math.max(lastEnd, instant.getTime() + durationMs);
       }
       cursor = addShanghaiDays(cursor, 1);
     }
-    // 目标时刻本身再跑一次，覆盖落在非整点的定时策略。
+    // 全部档位完成后，把仿真起点停在目标时刻；仅当任务耗时意外越过了目标时停在任务结束后。
     const finalAt = Math.max(target.getTime(), lastEnd);
     await this.clock.setOverride(this.clock.instant(finalAt).toISOString());
     await this.runner.runDue();

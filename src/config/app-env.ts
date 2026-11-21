@@ -10,12 +10,6 @@ export interface AppEnv {
   allowPreviewAuth: boolean;
   /** 时间仿真台开关。默认关闭；生产环境显式为 true 会被拒绝启动。 */
   simulationEnabled: boolean;
-  /**
-   * 仿真逐日推进：每个到期档位执行完后，仿真时钟前进的模拟任务耗时（分钟）。
-   * 真实环境的定时任务从计划钟点开始执行并占用一段真实时间；沙箱里任务瞬时
-   * 完成，用这个值把「任务占用的时间」体现在仿真时钟上。默认 5。
-   */
-  simulationTaskDurationMinutes: number;
   /** 待支付订单的自动关闭时长（分钟）。0 表示不自动关闭，回退为纯手动关单。 */
   orderPaymentTimeoutMinutes: number;
   adminJwtSecret: string;
@@ -47,7 +41,6 @@ export function parseAppEnv(source: NodeJS.ProcessEnv): AppEnv {
     allowClockOverride: readFlag(source, 'ALLOW_CLOCK_OVERRIDE'),
     allowPreviewAuth: readFlag(source, 'ALLOW_PREVIEW_AUTH'),
     simulationEnabled: readSimulationEnabled(source, nodeEnv),
-    simulationTaskDurationMinutes: readSimulationTaskDuration(source),
     orderPaymentTimeoutMinutes: readOrderPaymentTimeout(source),
     adminJwtSecret: readSecret(source, 'JWT_ADMIN_SECRET', nodeEnv),
     miniProgramTokenSecret: readSecret(source, 'MINI_PROGRAM_TOKEN_SECRET', nodeEnv),
@@ -115,26 +108,6 @@ function readSimulationEnabled(source: NodeJS.ProcessEnv, nodeEnv: string): bool
     throw new Error('生产环境不允许开启 SIMULATION_ENABLED（时间仿真台只在测试环境使用）');
   }
   return enabled;
-}
-
-/**
- * 仿真逐日推进的模拟任务耗时。默认 5 分钟；范围 1–120。
- * 真实环境的定时任务从计划钟点开始执行并占用一段时间；沙箱里任务瞬时完成，
- * 用这个值把「任务占用的时间」体现在仿真时钟上。
- */
-function readSimulationTaskDuration(source: NodeJS.ProcessEnv): number {
-  const raw = source.SIMULATION_TASK_DURATION_MINUTES;
-  if (raw === undefined || raw.trim() === '') {
-    return 5;
-  }
-  if (!/^\d+$/.test(raw.trim())) {
-    throw new Error('SIMULATION_TASK_DURATION_MINUTES 必须是正整数（分钟）');
-  }
-  const minutes = Number(raw.trim());
-  if (minutes < 1 || minutes > 120) {
-    throw new Error('SIMULATION_TASK_DURATION_MINUTES 必须在 1 到 120 之间');
-  }
-  return minutes;
 }
 
 /** 待支付订单自动关闭时长。默认 15 分钟；0 关闭该功能（只保留手动关单）。 */
