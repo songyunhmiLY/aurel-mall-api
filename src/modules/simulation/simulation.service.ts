@@ -44,10 +44,16 @@ import {
   SIMULATION_STORE,
   type SimulationDiff,
   type SimulationEvent,
+  type SimulationFilingInfo,
+  type SimulationLedgerEntry,
   type SimulationOverview,
   type SimulationSnapshot,
   type SimulationStatus,
   type SimulationStore,
+  type SimulationTreeEdge,
+  type SimulationTreeUser,
+  type SimulationUnfiledOrder,
+  type SimulationUsersTree,
 } from './simulation.types';
 
 const WALLET_POINTS = 'points';
@@ -153,7 +159,18 @@ export class SimulationService {
   async overview(): Promise<SimulationOverview> {
     this.assertEnabled();
     const clock = await this.clock.resolve();
-    const [total, members, orderCount, paid, cofounders, studios, opsTeam] = await Promise.all([
+    const [
+      total,
+      members,
+      orderCount,
+      paid,
+      cofounders,
+      studios,
+      opsTeam,
+      completedFilings,
+      settledFilings,
+      unfiledRows,
+    ] = await Promise.all([
       this.prisma.user.count(),
       this.prisma.user.count({ where: { member: true } }),
       this.prisma.order.count(),
@@ -165,7 +182,17 @@ export class SimulationService {
       this.prisma.cofounderEnrollment.count({ where: { status: COFOUNDER_STATUS_ACTIVE } }),
       this.prisma.studioEnrollment.count({ where: { status: STUDIO_STATUS_ACTIVE } }),
       this.prisma.opsTeamEnrollment.count({ where: { status: OPS_TEAM_STATUS_ACTIVE } }),
+      this.prisma.filing.count({ where: { sequence: { not: null } } }),
+      this.prisma.filing.findMany({
+        where: { status: 'settled' },
+        orderBy: { sequence: 'asc' },
+      }),
+      this.prisma.startupSubOrder.findMany({ where: { filedAt: null } }),
     ]);
+    const settledSequences = settledFilings
+      .map((row) => row.sequence)
+      .filter((value): value is number => value !== null);
+    const unfiledOrders = new Set(unfiledRows.map((row) => row.orderId.toString())).size;
     return {
       clock: {
         now: clock.now.toISOString(),
@@ -179,6 +206,7 @@ export class SimulationService {
         paidAmountFen: paid._sum.payAmountFen ?? 0,
       },
       roles: { cofounders, studios, opsTeam },
+      filings: { completed: completedFilings, settledSequences, unfiledOrders },
       businessDate: shanghaiBizDate(clock.now),
     };
   }
@@ -583,6 +611,147 @@ export class SimulationService {
   async timeline(): Promise<{ events: SimulationEvent[] }> {
     this.assertEnabled();
     return { events: await this.store.list() };
+  }
+
+  /**
+   * 演练用户树：邀请树与市场树的边、每个用户的展示信息（昵称/身份/三个钱包可用
+   * 余额），以及节点提示用的报单数据（已入公排的序号、已支付未报单的订单）。
+   * 演练库数据量小，一次全量拉取；正式环境本服务整体 403，不存在规模问题。
+   */
+  async usersTree(): Promise<SimulationUsersTree> {
+    this.assertEnabled();
+    const [users, walletRows, inviteRows, marketRows, cofounders, studios, opsTeam, filingRows] =
+      await Promise.all([
+        this.prisma.user.findMany({ orderBy: { id: 'asc' } }),
+        this.prisma.walletAccount.findMany(),
+        this.prisma.inviteTreeNode.findMany({ orderBy: { depth: 'asc' } }),
+        this.prisma.marketTreeNode.findMany({ orderBy: [{ depth: 'asc' }, { id: 'asc' }] }),
+        this.prisma.cofounderEnrollment.findMany({ where: { status: COFOUNDER_STATUS_ACTIVE } }),
+        this.prisma.studioEnrollment.findMany({ where: { status: STUDIO_STATUS_ACTIVE } }),
+        this.prisma.opsTeamEnrollment.findMany({ where: { status: OPS_TEAM_STATUS_ACTIVE } }),
+        this.prisma.filing.findMany({ orderBy: { filedAt: 'asc' } }),
+      ]);
+    const unfiledRows = await this.prisma.startupSubOrder.findMany({
+      where: { filedAt: null },
+      orderBy: { paidAt: 'asc' },
+    });
+    const orderIds = [...new Set(unfiledRows.map((row) => row.orderId))];
+    const orders = orderIds.length
+      ? await this.prisma.order.findMany({ where: { id: { in: orderIds } } })
+      : [];
+    const orderNoById = new Map(orders.map((row) => [row.id, row.orderNo]));
+
+    const seated = new Set(marketRows.map((row) => row.userId.toString()));
+    const cofounderIds = new Set(cofounders.map((row) => row.userId.toString()));
+    const studioIds = new Set(studios.map((row) => row.userId.toString()));
+    const opsTeamIds = new Set(opsTeam.map((row) => row.userId.toString()));
+    const walletsByUser = new Map<string, { withdrawable: number; points: number; consumption: number }>();
+    for (const row of walletRows) {
+      const key = row.userId.toString();
+      const entry = walletsByUser.get(key) ?? { withdrawable: 0, points: 0, consumption: 0 };
+      const balance = Number(row.balanceFen);
+      if (row.walletType === WALLET_WITHDRAWABLE) {
+        entry.withdrawable = balance;
+      } else if (row.walletType === WALLET_POINTS) {
+        entry.points = balance;
+      } else if (row.walletType === WALLET_CONSUMPTION) {
+        entry.consumption = balance;
+      }
+      walletsByUser.set(key, entry);
+    }
+
+    const treeUsers: SimulationTreeUser[] = users.map((row) => {
+      const key = row.id.toString();
+      const identities = [seated.has(key) ? 'member' : 'normal'];
+      if (cofounderIds.has(key)) identities.push('cofounder');
+      if (studioIds.has(key)) identities.push('studio');
+      if (opsTeamIds.has(key)) identities.push('ops_team');
+      return {
+        userId: key,
+        nickname: row.nickname,
+        identities,
+        wallets: walletsByUser.get(key) ?? { withdrawable: 0, points: 0, consumption: 0 },
+      };
+    });
+    const toEdges = (rows: Array<{ userId: bigint; parentUserId: bigint | null }>): SimulationTreeEdge[] =>
+      rows.map((row) => ({
+        userId: row.userId.toString(),
+        parentId: row.parentUserId === null ? null : row.parentUserId.toString(),
+      }));
+
+    const filings: Record<string, SimulationFilingInfo[]> = {};
+    for (const row of filingRows) {
+      if (row.sequence === null) {
+        continue;
+      }
+      const key = row.userId.toString();
+      const list = filings[key] ?? [];
+      list.push({
+        filingNo: row.filingNo,
+        sequence: row.sequence,
+        bizDate: row.bizDate,
+        status: row.status,
+        amountFen: row.amountFen,
+      });
+      filings[key] = list;
+    }
+
+    const unfiled: Record<string, SimulationUnfiledOrder[]> = {};
+    for (const row of unfiledRows) {
+      const key = row.userId.toString();
+      const list = unfiled[key] ?? [];
+      const orderNo = orderNoById.get(row.orderId);
+      const existing = list.find((item) => item.orderNo === orderNo);
+      if (existing) {
+        existing.units += 1;
+        existing.amountFen += row.amountFen;
+      } else {
+        list.push({
+          orderNo: orderNo ?? row.orderId.toString(),
+          paidAt: row.paidAt.toISOString(),
+          units: 1,
+          amountFen: row.amountFen,
+        });
+      }
+      unfiled[key] = list;
+    }
+
+    return {
+      users: treeUsers,
+      invite: toEdges(inviteRows),
+      market: toEdges(marketRows),
+      filings,
+      unfiled,
+    };
+  }
+
+  /** 节点点击后的账务变动明细：三个钱包的流水按发生时间倒序合并。 */
+  async userLedger(
+    input: { userId: bigint; limit: number },
+  ): Promise<{ entries: SimulationLedgerEntry[] }> {
+    this.assertEnabled();
+    const user = await this.prisma.user.findUnique({ where: { id: input.userId } });
+    if (!user) {
+      throw new NotFoundException('用户不存在');
+    }
+    const rows = await this.prisma.walletLedgerEntry.findMany({
+      where: { userId: input.userId },
+      orderBy: [{ occurredAt: 'desc' }, { id: 'desc' }],
+      take: input.limit,
+    });
+    return {
+      entries: rows.map((row) => ({
+        id: row.id.toString(),
+        occurredAt: row.occurredAt.toISOString(),
+        walletType: row.walletType,
+        direction: row.direction,
+        amountFen: Number(row.amountFen),
+        balanceAfterFen: Number(row.balanceAfterFen),
+        bizType: row.bizType,
+        bizId: row.bizId,
+        sourceCode: row.sourceCode,
+      })),
+    };
   }
 
   /**

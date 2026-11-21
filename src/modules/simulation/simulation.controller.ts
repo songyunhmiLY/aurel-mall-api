@@ -1,5 +1,6 @@
-import { Body, Controller, Delete, Get, HttpCode, Post, Put, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Param, Post, Put, Query, UseGuards } from '@nestjs/common';
 import { AdminJwtGuard } from '../../common/auth/admin-jwt.guard';
+import { parseRouteId } from '../../common/http/parse-id';
 import type { AdminPrincipal } from '../../common/auth/admin-principal';
 import { CurrentAdmin } from '../../common/auth/current-admin.decorator';
 import { ClockService } from '../../common/clock/clock.service';
@@ -39,6 +40,20 @@ export class SimulationController {
   @Get('timeline')
   timeline() {
     return this.simulation.timeline();
+  }
+
+  /** 演练用户树：邀请树/市场树的边 + 节点展示信息 + 提示用报单数据。 */
+  @Get('users-tree')
+  usersTree() {
+    return this.simulation.usersTree();
+  }
+
+  /** 节点点击后的账务变动明细（三钱包流水按发生时间倒序，默认最近 100 条）。 */
+  @Get('users/:id/ledger')
+  userLedger(@Param('id') id: string, @Query('limit') limit?: string) {
+    const parsed = Number.parseInt(limit ?? '', 10);
+    const capped = Number.isInteger(parsed) ? Math.min(Math.max(parsed, 1), 500) : 100;
+    return this.simulation.userLedger({ userId: parseRouteId(id), limit: capped });
   }
 
   @Put('clock')

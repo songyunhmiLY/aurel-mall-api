@@ -371,6 +371,101 @@ describe('simulation actions', () => {
     expect(clock.current.toISOString()).toBe('2026-01-02T05:00:00.000Z');
   });
 
+  it('builds both trees with identities, wallets, filings and unfiled orders', async () => {
+    const { stage, service } = buildSimulation(true);
+    await stage.users.onModuleInit();
+    const product = await stage.catalog.create({
+      zone: 'startup',
+      name: '创业礼包',
+      freightFen: 0,
+      stockQuantity: 100,
+      status: 'on',
+    });
+    const created = await service.registerBatch({ count: 2 });
+    const buyerId = created.created[0]!.id;
+    const plainUserId = created.created[1]!.id;
+    const bought = await service.purchaseBatch({
+      userIds: [buyerId],
+      productId: product.product.id.toString(),
+      quantityMin: 2,
+      quantityMax: 2,
+    });
+    expect(bought.results[0]!.ok).toBe(true);
+    const rootId = stage.db.user.rows.find((row) => row.inviteCode === '000000')!.id.toString();
+
+    const tree = await service.usersTree();
+
+    // 邀请树：根 + 两个注册用户；市场树：只有根与已入座的买家。
+    expect(tree.invite).toEqual(
+      expect.arrayContaining([
+        { userId: rootId, parentId: null },
+        { userId: buyerId, parentId: rootId },
+        { userId: plainUserId, parentId: rootId },
+      ]),
+    );
+    expect(tree.market.map((edge) => edge.userId).sort()).toEqual([rootId, buyerId].sort());
+
+    const buyer = tree.users.find((item) => item.userId === buyerId)!;
+    const plain = tree.users.find((item) => item.userId === plainUserId)!;
+    expect(buyer.identities).toEqual(['member']);
+    expect(plain.identities).toEqual(['normal']);
+    expect(buyer.wallets).toEqual({ withdrawable: 0, points: 0, consumption: 0 });
+
+    // 买家买 2 件：当天只报 1 单，另一件仍待报单。
+    expect(tree.filings[buyerId]).toHaveLength(1);
+    expect(tree.filings[buyerId]![0]!.sequence).toBe(1);
+    expect(tree.unfiled[buyerId]).toHaveLength(1);
+    expect(tree.unfiled[buyerId]![0]!.units).toBe(1);
+    expect(tree.unfiled[buyerId]![0]!.amountFen).toBe(stage.locked.startupZoneUnitPriceFen);
+    expect(tree.unfiled[plainUserId]).toBeUndefined();
+  });
+
+  it('returns a user ledger merged across wallets, newest first, capped by limit', async () => {
+    const { stage, service } = buildSimulation(true);
+    await stage.users.onModuleInit();
+    const rootId = stage.db.user.rows.find((row) => row.inviteCode === '000000')!.id;
+    let account = stage.db.walletAccount.rows.find(
+      (row) => row.userId === rootId && row.walletType === 'points',
+    );
+    if (!account) {
+      account = await stage.db.walletAccount.create({
+        data: {
+          userId: rootId,
+          walletType: 'points',
+          balanceFen: 0n,
+          frozenFen: 0n,
+          updatedAt: new Date('2026-01-05T00:00:00.000Z'),
+        },
+      });
+    }
+    const base = Date.parse('2026-01-05T00:00:00.000Z');
+    for (const [index, amount] of [100, 250, 400].entries()) {
+      const at = new Date(base + index * 60_000);
+      await stage.db.walletLedgerEntry.create({
+        data: {
+          accountId: account.id,
+          userId: rootId,
+          walletType: index === 1 ? 'withdrawable' : 'points',
+          direction: 'credit',
+          amountFen: BigInt(amount),
+          balanceAfterFen: BigInt(amount),
+          bizType: 'order_payment',
+          bizId: `biz-${index}`,
+          sourceCode: null,
+          occurredAt: at,
+          createdAt: at,
+        },
+      });
+    }
+
+    const result = await service.userLedger({ userId: rootId, limit: 2 });
+
+    expect(result.entries).toHaveLength(2);
+    expect(result.entries.map((entry) => entry.bizId)).toEqual(['biz-2', 'biz-1']);
+    expect(result.entries[0]!.amountFen).toBe(400);
+    expect(result.entries[1]!.walletType).toBe('withdrawable');
+  });
+
   it('advances day by day at configured clock times, ending at the target', async () => {
     const { stage, service, runnerCalls } = buildSimulation(true);
     await stage.users.onModuleInit();

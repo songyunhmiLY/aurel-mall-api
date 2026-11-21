@@ -93,6 +93,12 @@ export interface SimulationOverview {
     studios: number;
     opsTeam: number;
   };
+  /** 全网公排：已完成报单数、已返现的序号、尚未报单的创业订单数。 */
+  filings: {
+    completed: number;
+    settledSequences: number[];
+    unfiledOrders: number;
+  };
   businessDate: string;
 }
 
@@ -107,3 +113,61 @@ export const SIMULATION_STORE = Symbol('SIMULATION_STORE');
 
 /** 时间轴最多保留的事件数。 */
 export const SIMULATION_TIMELINE_CAP = 500;
+
+/** 用户树节点上的用户信息：昵称、身份与三个钱包可用余额（分）。 */
+export interface SimulationTreeUser {
+  userId: string;
+  nickname: string;
+  identities: string[];
+  wallets: {
+    withdrawable: number;
+    points: number;
+    consumption: number;
+  };
+}
+
+/** 树边：parentId 为空表示根。 */
+export interface SimulationTreeEdge {
+  userId: string;
+  parentId: string | null;
+}
+
+/** 已进入公排的报单：sequence 是全局序号。 */
+export interface SimulationFilingInfo {
+  filingNo: string;
+  sequence: number | null;
+  bizDate: string | null;
+  status: string;
+  amountFen: number;
+}
+
+/** 已支付但尚未报单的创业专区订单（按订单聚合）。 */
+export interface SimulationUnfiledOrder {
+  orderNo: string;
+  paidAt: string;
+  /** 该订单拆出的报单资格件数。 */
+  units: number;
+  amountFen: number;
+}
+
+/** 演练用户树：两棵树的边 + 每个用户的展示信息 + 节点提示用的报单数据。 */
+export interface SimulationUsersTree {
+  users: SimulationTreeUser[];
+  invite: SimulationTreeEdge[];
+  market: SimulationTreeEdge[];
+  filings: Record<string, SimulationFilingInfo[]>;
+  unfiled: Record<string, SimulationUnfiledOrder[]>;
+}
+
+/** 钱包流水明细（用于节点点击后的账务变动列表）。 */
+export interface SimulationLedgerEntry {
+  id: string;
+  occurredAt: string;
+  walletType: string;
+  direction: string;
+  amountFen: number;
+  balanceAfterFen: number;
+  bizType: string;
+  bizId: string;
+  sourceCode: string | null;
+}
