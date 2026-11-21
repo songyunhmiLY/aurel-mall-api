@@ -48,8 +48,13 @@ export class SeedTreeDto {
   productId?: string;
 }
 
-/** 批量购买创业专区商品。不指定用户时从已注册用户里随机取。 */
+/** 批量购买商品（创业专区或会员商城）。不指定用户时从已入座会员里随机取。 */
 export class SimulatePurchaseDto {
+  /** 专区。不传按创业专区。 */
+  @IsOptional()
+  @IsIn(['startup', 'mall'], { message: '专区不正确' })
+  zone?: 'startup' | 'mall';
+
   @IsOptional()
   @IsArray()
   @ArrayMaxSize(200)
@@ -62,7 +67,7 @@ export class SimulatePurchaseDto {
   @Max(200)
   count?: number;
 
-  /** 不传时取创业专区第一个上架商品。 */
+  /** 不传时取该专区第一件上架商品。 */
   @IsOptional()
   @Matches(ID_PATTERN, { message: '商品编号不正确' })
   productId?: string;

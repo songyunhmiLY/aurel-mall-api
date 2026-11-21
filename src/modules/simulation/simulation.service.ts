@@ -364,21 +364,24 @@ export class SimulationService {
   }
 
   /**
-   * 批量购买创业专区商品。走真实下单、真实支付拆分与沙箱支付成功，
-   * 因此会触发入座、报单、公排与分红，和线上下单完全同一条路径。
+   * 批量购买商品。创业专区会触发入座、报单、公排与分红；会员商城走消费金→
+   * 可提现→微信的真实拆分，不参与报单与市场树。两个专区都走真实下单 + 沙箱支付。
    */
   async purchaseBatch(input: {
+    zone?: 'startup' | 'mall';
     userIds?: string[];
     count?: number;
     productId?: string;
     quantityMin?: number;
     quantityMax?: number;
   }): Promise<{
+    zone: 'startup' | 'mall';
     product: { id: string; name: string; priceFen: number };
     results: SimulatedPurchaseResult[];
   }> {
     this.assertEnabled();
-    const product = await this.resolveStartupProduct(input.productId);
+    const zone = input.zone ?? 'startup';
+    const product = await this.resolveProduct(zone, input.productId);
     const min = input.quantityMin ?? 1;
     const max = input.quantityMax ?? min;
     if (max < min) {
@@ -387,10 +390,11 @@ export class SimulationService {
     const targets = await this.resolveTargetUsers(input);
     const results: SimulatedPurchaseResult[] = [];
     for (const target of targets) {
-      results.push(await this.purchaseOne(target, product.id, min, max));
+      results.push(await this.purchaseOne(target, zone, product.id, min, max));
     }
     await this.append('purchase', { created: results.filter((item) => item.ok).length });
     return {
+      zone,
       product: { id: product.id.toString(), name: product.name, priceFen: product.priceFen },
       results,
     };
@@ -433,7 +437,7 @@ export class SimulationService {
       didReset = true;
     }
     const root = await this.resolveInviter(undefined);
-    const product = await this.resolveStartupProduct(input.productId);
+    const product = await this.resolveProduct('startup', input.productId);
     const payHash = await hashPassword(SEED_PAYMENT_PASSWORD);
     const lettersByUserId = new Map<string, string>([[root.id.toString(), 'R']]);
     const created: SeededTreeNode[] = [];
@@ -474,6 +478,7 @@ export class SimulationService {
         await this.users.bindInviter(user.id, root.inviteCode as string);
         const bought = await this.purchaseOne(
           { id: user.id, nickname: provisional },
+          'startup',
           product.id,
           1,
           1,
@@ -736,17 +741,21 @@ export class SimulationService {
     return { id: root.id, inviteCode: root.inviteCode, nickname: root.nickname };
   }
 
-  private async resolveStartupProduct(productId: string | undefined): Promise<{
+  private async resolveProduct(
+    zone: 'startup' | 'mall',
+    productId: string | undefined,
+  ): Promise<{
     id: bigint;
     name: string;
     priceFen: number;
   }> {
+    const zoneLabel = zone === 'mall' ? '会员商城' : '创业专区';
     if (productId !== undefined) {
       const product = await this.prisma.product.findFirst({
-        where: { id: BigInt(productId), zone: 'startup', status: 'on' },
+        where: { id: BigInt(productId), zone, status: 'on' },
       });
       if (!product) {
-        throw new NotFoundException('创业专区商品不存在或未上架');
+        throw new NotFoundException(`${zoneLabel}商品不存在或未上架`);
       }
       const sku = await this.prisma.productSku.findFirst({ where: { productId: product.id } });
       if (!sku) {
@@ -755,11 +764,11 @@ export class SimulationService {
       return { id: product.id, name: product.name, priceFen: sku.priceFen };
     }
     const product = await this.prisma.product.findFirst({
-      where: { zone: 'startup', status: 'on' },
+      where: { zone, status: 'on' },
       orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }],
     });
     if (!product) {
-      throw new BadRequestException('创业专区没有上架商品，请先创建一件');
+      throw new BadRequestException(`${zoneLabel}没有上架商品，请先创建一件`);
     }
     const sku = await this.prisma.productSku.findFirst({ where: { productId: product.id } });
     if (!sku) {
@@ -808,6 +817,7 @@ export class SimulationService {
 
   private async purchaseOne(
     target: { id: bigint; nickname: string },
+    zone: 'startup' | 'mall',
     productId: bigint,
     min: number,
     max: number,
@@ -828,7 +838,7 @@ export class SimulationService {
     try {
       const addressId = await this.ensureAddress(target.id, target.nickname);
       const order = await this.orders.create(target.id, {
-        zone: 'startup',
+        zone,
         addressId,
         items: [{ productId, quantity }],
       });
@@ -837,10 +847,14 @@ export class SimulationService {
         await this.wechat.simulateSuccess(paid.wechat.payNo);
       }
       const fresh = await this.orders.getForUser(target.id, order.id);
-      const now = await this.clock.now();
-      const filed = await this.prisma.filing.findFirst({
-        where: { userId: target.id, bizDate: shanghaiBizDate(now) },
-      });
+      let filed = false;
+      if (zone === 'startup') {
+        const now = await this.clock.now();
+        const filing = await this.prisma.filing.findFirst({
+          where: { userId: target.id, bizDate: shanghaiBizDate(now) },
+        });
+        filed = filing !== null;
+      }
       return {
         ...base,
         ok: true,
@@ -848,7 +862,7 @@ export class SimulationService {
         orderNo: fresh.orderNo,
         payAmountFen: fresh.payAmountFen,
         status: fresh.status,
-        filed: filed !== null,
+        filed,
       };
     } catch (error) {
       return {

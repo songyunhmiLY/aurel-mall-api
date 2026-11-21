@@ -195,6 +195,101 @@ describe('simulation actions', () => {
     expect(stage.db.userAddress.rows).toHaveLength(2);
   });
 
+  it('buys mall products for selected members without seating or filing', async () => {
+    const { stage, service } = buildSimulation(true);
+    await stage.users.onModuleInit();
+    const startup = await stage.catalog.create({
+      zone: 'startup',
+      name: '创业礼包',
+      freightFen: 0,
+      stockQuantity: 999,
+      status: 'on',
+    });
+    const category = await stage.catalog.createCategory({ name: '日用品' });
+    const mall = await stage.catalog.create({
+      zone: 'mall',
+      name: '商城好物',
+      freightFen: 0,
+      stockQuantity: 999,
+      status: 'on',
+      priceFen: 5000,
+      pvFen: 5000,
+      categoryId: category.id,
+    });
+    // 先买创业专区入座成为会员，商城下单要求会员身份。
+    const created = await service.registerBatch({ count: 2 });
+    const userIds = created.created.map((item) => item.id);
+    await service.purchaseBatch({ userIds, productId: startup.product.id.toString() });
+    const filingsBefore = stage.db.filing.rows.length;
+    const treeBefore = stage.db.marketTreeNode.rows.length;
+
+    const result = await service.purchaseBatch({
+      zone: 'mall',
+      userIds,
+      productId: mall.product.id.toString(),
+      quantityMin: 1,
+      quantityMax: 1,
+    });
+
+    expect(result.zone).toBe('mall');
+    expect(result.results).toHaveLength(2);
+    for (const item of result.results) {
+      expect(item.ok).toBe(true);
+      expect(item.status).toBe('paid');
+      expect(item.payAmountFen).toBe(5000);
+      // 商城单不报单、不新增市场树席位。
+      expect(item.filed).toBe(false);
+    }
+    expect(stage.db.filing.rows).toHaveLength(filingsBefore);
+    expect(stage.db.marketTreeNode.rows).toHaveLength(treeBefore);
+    expect(stage.db.order.rows.filter((row) => row.zone === 'mall')).toHaveLength(2);
+    // 商城单不产生创业子单。
+    expect(stage.db.startupSubOrder.rows).toHaveLength(2);
+  });
+
+  it('rejects mall orders for non-members and wrong-zone products', async () => {
+    const { stage, service } = buildSimulation(true);
+    await stage.users.onModuleInit();
+    const startup = await stage.catalog.create({
+      zone: 'startup',
+      name: '创业礼包',
+      freightFen: 0,
+      stockQuantity: 999,
+      status: 'on',
+    });
+    const category = await stage.catalog.createCategory({ name: '日用品' });
+    const mall = await stage.catalog.create({
+      zone: 'mall',
+      name: '商城好物',
+      freightFen: 0,
+      stockQuantity: 999,
+      status: 'on',
+      priceFen: 5000,
+      pvFen: 5000,
+      categoryId: category.id,
+    });
+    const created = await service.registerBatch({ count: 1 });
+    const plainUserId = created.created[0]!.id;
+
+    // 未入座的普通用户不能下商城单，逐单返回失败原因而不是整批报错。
+    const blocked = await service.purchaseBatch({
+      zone: 'mall',
+      userIds: [plainUserId],
+      productId: mall.product.id.toString(),
+    });
+    expect(blocked.results[0]!.ok).toBe(false);
+    expect(blocked.results[0]!.error).toContain('只有会员');
+
+    // 用创业商品编号买商城会被拒绝。
+    await expect(
+      service.purchaseBatch({
+        zone: 'mall',
+        userIds: [plainUserId],
+        productId: startup.product.id.toString(),
+      }),
+    ).rejects.toThrow('会员商城商品不存在或未上架');
+  });
+
   it('seeds a full 3-9-27 tree with rule-based nicknames', async () => {
     const { stage, service } = buildSimulation(true);
     await stage.users.onModuleInit();
