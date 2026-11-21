@@ -1,7 +1,6 @@
 import {
   ArrayMaxSize,
   IsArray,
-  IsBoolean,
   IsIn,
   IsInt,
   IsISO8601,
@@ -26,26 +25,13 @@ export class RegisterUsersDto {
   inviterUserId?: string;
 }
 
-/** 生成演示市场树。默认 3+9+27 三层满树，先重置业务数据；每层节点数可自定义。 */
-export class SeedTreeDto {
-  /** 每层节点数，按层序落座。缺省 [3, 9, 27]。 */
+/** 红包报名演示。userIds 为空时对全部在籍会员报名；报名时间取当前仿真时刻。 */
+export class RedPacketSignupDto {
   @IsOptional()
   @IsArray()
-  @ArrayMaxSize(4)
-  @IsInt({ each: true })
-  @Min(1, { each: true })
-  @Max(27, { each: true })
-  layers?: number[];
-
-  /** 生成前是否先清空业务数据。默认 true。 */
-  @IsOptional()
-  @IsBoolean()
-  reset?: boolean;
-
-  /** 创业专区商品。不传取第一个上架商品。 */
-  @IsOptional()
-  @Matches(ID_PATTERN, { message: '商品编号不正确' })
-  productId?: string;
+  @ArrayMaxSize(200)
+  @Matches(ID_PATTERN, { each: true, message: '用户编号不正确' })
+  userIds?: string[];
 }
 
 /** 批量购买商品（创业专区或会员商城）。不指定用户时从已入座会员里随机取。 */

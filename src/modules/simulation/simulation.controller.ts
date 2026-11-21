@@ -7,7 +7,7 @@ import { SetClockOverrideDto } from '../../common/clock/dto/set-clock-override.d
 import {
   AdvanceSimulationDto,
   RegisterUsersDto,
-  SeedTreeDto,
+  RedPacketSignupDto,
   SimulatePurchaseDto,
   SimulateRoleDto,
 } from './dto/simulation-actions.dto';
@@ -76,11 +76,11 @@ export class SimulationController {
     return this.simulation.purchaseBatch(body);
   }
 
-  /** 生成演示市场树：默认清空后重建 3+9+27 三层满树，昵称按演练命名规则回填。 */
-  @Post('seed-tree')
+  /** 红包报名演示：userIds 为空时对全部在籍会员报名，报名时间取当前仿真时刻。 */
+  @Post('red-packet-signup')
   @HttpCode(200)
-  seedTree(@Body() body: SeedTreeDto) {
-    return this.simulation.seedTree(body);
+  redPacketSignup(@Body() body: RedPacketSignupDto) {
+    return this.simulation.redPacketSignup(body);
   }
 
   @Post('role')

@@ -12,6 +12,7 @@ import type { CofounderPayService } from '../src/modules/cofounder/cofounder-pay
 import type { CofounderEnrollmentService } from '../src/modules/cofounder/cofounder-enrollment.service';
 import type { StudioEnrollmentService } from '../src/modules/studio/studio-enrollment.service';
 import type { OpsTeamEnrollmentService } from '../src/modules/ops-team/ops-team-enrollment.service';
+import type { RedPacketService } from '../src/modules/rewards/red-packet/red-packet.service';
 import type { SimulationEvent, SimulationStore } from '../src/modules/simulation/simulation.types';
 import { Stage1Db } from './support/stage1-db';
 import { stage1Env } from './support/stage1-harness';
@@ -109,6 +110,7 @@ function buildService(input: { enabled: boolean; env?: Partial<AppEnv> }) {
     {} as unknown as CofounderEnrollmentService,
     {} as unknown as StudioEnrollmentService,
     {} as unknown as OpsTeamEnrollmentService,
+    {} as unknown as RedPacketService,
     store,
     env,
   );

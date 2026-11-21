@@ -57,8 +57,12 @@ function withOverride(clock: MutableClock): MutableClock {
   return clock;
 }
 
-function buildSimulation(enabled: boolean, overrides: Partial<AppEnv> = {}) {
-  const stage = buildStage4();
+function buildSimulation(
+  enabled: boolean,
+  overrides: Partial<AppEnv> = {},
+  locked = stage4Locked(),
+) {
+  const stage = buildStage4(locked);
   const clock = withOverride(stage.clock);
   const runnerCalls: string[] = [];
   const runner = {
@@ -69,6 +73,8 @@ function buildSimulation(enabled: boolean, overrides: Partial<AppEnv> = {}) {
   const env: AppEnv = {
     ...stage.env,
     ...overrides,
+    // 兼容旧用例：overrides 里直接给 locked（只影响 env）时优先用它。
+    locked: overrides.locked ?? locked,
     simulationEnabled: enabled,
     allowClockOverride: true,
   };
@@ -84,6 +90,7 @@ function buildSimulation(enabled: boolean, overrides: Partial<AppEnv> = {}) {
     {} as unknown as CofounderEnrollmentService,
     {} as unknown as StudioEnrollmentService,
     {} as unknown as OpsTeamEnrollmentService,
+    stage.redPackets,
     new MemoryStore(),
     env,
   );
@@ -99,6 +106,7 @@ describe('simulation actions', () => {
     await expect(service.advance({ to: '2026-01-02T00:00:00.000Z' })).rejects.toBeInstanceOf(
       ForbiddenException,
     );
+    await expect(service.redPacketSignup({})).rejects.toBeInstanceOf(ForbiddenException);
     await expect(service.resetData()).rejects.toBeInstanceOf(ForbiddenException);
   });
 
@@ -310,8 +318,13 @@ describe('simulation actions', () => {
     ).rejects.toThrow('会员商城商品不存在或未上架');
   });
 
-  it('seeds a full 3-9-27 tree with rule-based nicknames', async () => {
-    const { stage, service } = buildSimulation(true);
+  it('signs members up for the red packet with the simulated clock time', async () => {
+    const locked = {
+      ...stage4Locked(),
+      redPacketRoundPayThresholdFen: 100_000,
+      redPacketRoundClaimCapFen: 5_000,
+    };
+    const { stage, service, clock } = buildSimulation(true, {}, locked);
     await stage.users.onModuleInit();
     const product = await stage.catalog.create({
       zone: 'startup',
@@ -320,61 +333,42 @@ describe('simulation actions', () => {
       stockQuantity: 999,
       status: 'on',
     });
-    const usersBefore = stage.db.user.rows.length;
-
-    const result = await service.seedTree({
+    await service.setClock('2026-01-02T05:00:00.000Z');
+    const registered = await service.registerBatch({ count: 2 });
+    const buyerId = registered.created[0]!.id;
+    const plainUserId = registered.created[1]!.id;
+    await service.purchaseBatch({
+      zone: 'startup',
+      userIds: [buyerId],
       productId: product.product.id.toString(),
-      reset: false,
     });
 
-    expect(result.layers).toEqual([3, 9, 27]);
-    expect(result.created).toHaveLength(39);
-    expect(result.created.every((item) => item.ok)).toBe(true);
-    expect(stage.db.user.rows).toHaveLength(usersBefore + 39);
+    // 一键全报名：池子只有会员（根账户 + 刚入座的买家）。
+    const all = await service.redPacketSignup({});
+    expect(all.total).toBe(2);
+    expect(all.signed).toBe(1);
+    expect(all.skipped).toBe(1);
+    const rootResult = all.results[0]!;
+    expect(rootResult.outcome).toBe('skipped');
+    expect(rootResult.error).toContain('不具备报名资格');
+    const buyerResult = all.results[1]!;
+    expect(buyerResult.userId).toBe(buyerId);
+    expect(buyerResult.outcome).toBe('signed');
 
-    // 每层节点数与层级命名。
-    for (const layer of [1, 2, 3]) {
-      const nodes = result.created.filter((item) => item.layer === layer);
-      expect(nodes).toHaveLength(3 ** layer);
-    }
-    expect(result.created.find((item) => item.treePath === 'A')?.nickname).toBe('L1·A·父R·邀R');
-    expect(result.created.find((item) => item.treePath === 'BA')?.nickname).toBe('L2·BA·父B·邀R');
-    expect(result.created.find((item) => item.treePath === 'ABC')?.nickname).toBe(
-      'L3·ABC·父AB·邀R',
-    );
+    // 报名时间 = 当前仿真时刻（13:00 上海）。
+    const rows = stage.db.redPacketSignup.rows;
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.userId).toBe(BigInt(buyerId));
+    expect(rows[0]!.bizDate).toBe('2026-01-02');
+    expect((rows[0]!.signedAt as Date).toISOString()).toBe('2026-01-02T05:00:00.000Z');
 
-    // 树结构：每个非根节点的父路径 = 自己路径去掉最后一位；根恰好 3 个孩子。
-    const byId = new Map(stage.db.marketTreeNode.rows.map((row) => [row.userId, row]));
-    expect(byId.size).toBe(40);
-    for (const item of result.created) {
-      const node = byId.get(BigInt(item.userId))!;
-      expect(node.depth).toBe(item.layer);
-    }
-    const rootId = stage.db.user.rows.find((row) => row.inviteCode === '000000')!.id;
-    const rootChildren = [...byId.values()].filter((row) => row.parentUserId === rootId);
-    expect(rootChildren).toHaveLength(3);
-
-    // 邀请关系全部指向根账户：邀请 ≠ 树上级（除第一层）。
-    for (const item of result.created.filter((node) => node.layer > 1)) {
-      expect(item.invitedBy).toBe('R');
-      expect(item.parentPath).not.toBe('R');
-    }
-
-    // 支付密码统一 123456。
-    const paymentRows = stage.db.userPaymentPassword.rows;
-    expect(paymentRows).toHaveLength(39);
-    expect(await verifyPassword(paymentRows[0]!.passwordHash as string, '123456')).toBe(true);
-  });
-
-  it('refuses to seed more nodes than the cap and validates layer sizes', async () => {
-    const { service } = buildSimulation(true);
-    await expect(service.seedTree({ layers: [27, 27, 27, 27], reset: false })).rejects.toThrow(
-      '单次最多生成',
-    );
-    await expect(service.seedTree({ layers: [0], reset: false })).rejects.toThrow('每层节点数');
-    await expect(service.seedTree({ layers: [1, 2, 3, 4, 5], reset: false })).rejects.toThrow(
-      '层数',
-    );
+    // 指定名单：已报过的返回 already，非会员的直接跳过。
+    const again = await service.redPacketSignup({ userIds: [buyerId, plainUserId] });
+    expect(again.signed).toBe(0);
+    expect(again.alreadySigned).toBe(1);
+    expect(again.skipped).toBe(1);
+    expect(again.results[1]!.outcome).toBe('skipped');
+    expect(clock.current.toISOString()).toBe('2026-01-02T05:00:00.000Z');
   });
 
   it('advances day by day at configured clock times, ending at the target', async () => {

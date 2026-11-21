@@ -7,6 +7,7 @@ import { CofounderModule } from '../cofounder/cofounder.module';
 import { OpsTeamModule } from '../ops-team/ops-team.module';
 import { OrdersModule } from '../orders/orders.module';
 import { PaymentsModule } from '../payments/payments.module';
+import { RedPacketModule } from '../rewards/red-packet/red-packet.module';
 import { StudioModule } from '../studio/studio.module';
 import { UsersModule } from '../users/users.module';
 import { SimulationController } from './simulation.controller';
@@ -26,6 +27,7 @@ import { SimulationService } from './simulation.service';
     UsersModule,
     OrdersModule,
     PaymentsModule,
+    RedPacketModule,
     CofounderModule,
     CofounderPayModule,
     StudioModule,

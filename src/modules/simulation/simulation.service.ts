@@ -39,6 +39,7 @@ import {
 import { OrdersService } from '../orders/orders.service';
 import { WITHDRAWAL_PENDING } from '../wallet/wallet.constants';
 import { WechatPayService } from '../payments/wechat-pay.service';
+import { RedPacketService } from '../rewards/red-packet/red-packet.service';
 import {
   SIMULATION_STORE,
   type SimulationDiff,
@@ -63,14 +64,9 @@ const MAX_ADVANCE_DAYS = 180;
 /** 演练用户统一支付密码：消费划转、提现等资金操作校验用。 */
 const SEED_PAYMENT_PASSWORD = '123456';
 
-/** 市场树位次字母：槽位 1/2/3 = 左/中/右 = A/B/C。 */
-const SLOT_LETTERS = ['A', 'B', 'C'] as const;
-
 /** 演练命名规则：L{层}·{路径}·父{父路径}·邀{邀请人路径}，第二段是树路径。 */
 const TREE_NICKNAME_PATTERN = /^L\d+·([A-Za-z]+)·/;
 
-/** 单次生成演示树的节点上限。 */
-const MAX_SEED_NODES = 100;
 const MAX_BATCH_USERS = 200;
 
 let eventSeq = 0;
@@ -99,15 +95,24 @@ export interface SimulatedRoleResult {
   error: string | null;
 }
 
+export interface SimulatedRedPacketSignupResult {
+  userId: string;
+  nickname: string;
+  /** signed=本次报名成功；already=当天已报过；skipped=没报上。 */
+  outcome: 'signed' | 'already' | 'skipped';
+  /** skipped 时的原因。 */
+  error: string | null;
+}
+
 /**
  * 时间仿真台。
  * 1. 时钟：设置/清除覆盖，单步推进，逐业务日推进；
- * 2. 造数：批量注册、批量购买创业专区、任命角色；
+ * 2. 造数：批量注册、批量购买创业专区/会员商城、红包报名、任命角色；
  * 3. 观测：总览、时间轴、每步账务差分；
  * 4. 重置：清空业务数据，保留商品与系统配置。
  *
  * 只在非正式环境启用：env.simulationEnabled=false 时所有操作都拒绝。
- * 造数走的是正式业务服务（下单、支付、报单、入座、角色开通），不是伪造行。
+ * 造数走的是正式业务服务（下单、支付、报单、入座、角色开通、红包报名），不是伪造行。
  */
 @Injectable()
 export class SimulationService {
@@ -125,6 +130,7 @@ export class SimulationService {
     private readonly cofounders: CofounderEnrollmentService,
     private readonly studios: StudioEnrollmentService,
     private readonly opsTeam: OpsTeamEnrollmentService,
+    private readonly redPackets: RedPacketService,
     @Inject(SIMULATION_STORE) private readonly store: SimulationStore,
     @Inject(APP_ENV) private readonly env: AppEnv,
   ) {}
@@ -340,13 +346,9 @@ export class SimulationService {
   }
 
   /**
-   * 批量注册。用户是真实 users 行，挂了邀请关系，能直接下单。
-   * 邀请人必须是已有会员（默认根账户）：只有会员才有邀请码。
-   */
-  /**
    * 批量注册仿真用户，昵称按演练命名规则生成：
    * `L{层}·{邀请路径}{序号}·邀{邀请人路径}`，序号是 26 进制小写 a、b、…、z、aa…。
-   * 路径大写字母段是种子市场树（A/B/C = 左/中/右），小写段是这里延伸出的邀请谱系。
+   * 路径大写字母段是市场树（A/B/C = 左/中/右），小写段是邀请谱系。
    * 每个用户都带上统一支付密码（SEED_PAYMENT_PASSWORD），演练资金操作不用逐个设置。
    */
   async registerBatch(input: { count: number; inviterUserId?: string }): Promise<{
@@ -436,145 +438,91 @@ export class SimulationService {
   }
 
   /**
-   * 生成演示市场树，默认 3+9+27 三层满树。
-   *
-   * 全部挂在根账户下：入座规则是「落在邀请人子树的最浅空位」，根满之后自动
-   * 逐层往深处落座，所以树形必然是层序满树；而邀请人全部是根——正好演示
-   * 「邀请关系 ≠ 树上级」。
-   *
-   * 落座后按实际席位回填昵称：`L{层}·{路径}·父{父路径}·邀R`。
-   * 路径字母 A/B/C = 左/中/右，根 = R，层级 = 路径长度。
-   * 每人统一支付密码 SEED_PAYMENT_PASSWORD，走真实下单、支付、报单与入座。
+   * 红包报名演示。走真实的 RedPacketService.signup：会员且红包额度未领满才报得上，
+   * 报名时间就是当前仿真时刻（signedAt = clock.now()）。userIds 为空时对全部
+   * 在籍会员报名（一键全报名），否则只报指定用户。
    */
-  async seedTree(input: { layers?: number[]; reset?: boolean; productId?: string }): Promise<{
-    reset: boolean;
-    layers: number[];
-    product: { id: string; name: string };
-    created: SeededTreeNode[];
+  async redPacketSignup(input: { userIds?: string[] } = {}): Promise<{
+    total: number;
+    signed: number;
+    alreadySigned: number;
+    skipped: number;
+    results: SimulatedRedPacketSignupResult[];
   }> {
     this.assertEnabled();
-    const layers = input.layers ?? [3, 9, 27];
-    if (layers.length < 1 || layers.length > 4) {
-      throw new BadRequestException('层数必须是 1 到 4');
-    }
-    for (const count of layers) {
-      if (!Number.isInteger(count) || count < 1 || count > 27) {
-        throw new BadRequestException('每层节点数必须是 1 到 27');
+    let targets: { id: bigint; nickname: string }[];
+    if (input.userIds !== undefined && input.userIds.length > 0) {
+      if (input.userIds.length > MAX_BATCH_USERS) {
+        throw new BadRequestException(`一次最多 ${MAX_BATCH_USERS} 人`);
+      }
+      const ids = input.userIds.map((value) => BigInt(value));
+      const rows = await this.prisma.user.findMany({ where: { id: { in: ids } } });
+      const byId = new Map(rows.map((row) => [row.id.toString(), row]));
+      const missing = input.userIds.filter((id) => !byId.has(id));
+      if (missing.length > 0) {
+        throw new NotFoundException(`用户不存在：${missing.join(', ')}`);
+      }
+      targets = input.userIds.map((id) => {
+        const row = byId.get(id)!;
+        return { id: row.id, nickname: row.nickname };
+      });
+    } else {
+      targets = await this.prisma.user.findMany({
+        where: { member: true, status: 'active' },
+        orderBy: { id: 'asc' },
+      });
+      if (targets.length === 0) {
+        throw new BadRequestException('还没有会员，请先注册并下单入座');
       }
     }
-    const total = layers.reduce((sum, count) => sum + count, 0);
-    if (total > MAX_SEED_NODES) {
-      throw new BadRequestException(`单次最多生成 ${MAX_SEED_NODES} 个节点`);
-    }
-    let didReset = false;
-    if (input.reset ?? true) {
-      // 造树要落在当前仿真时刻上，不能顺手把时钟拉回真实时间。
-      await this.resetData({ keepClock: true });
-      didReset = true;
-    }
-    const root = await this.resolveInviter(undefined);
-    const product = await this.resolveProduct('startup', input.productId);
-    const payHash = await hashPassword(SEED_PAYMENT_PASSWORD);
-    const lettersByUserId = new Map<string, string>([[root.id.toString(), 'R']]);
-    const created: SeededTreeNode[] = [];
-    let order = 0;
-    for (const layerCount of layers) {
-      for (let index = 0; index < layerCount; index += 1) {
-        order += 1;
-        const provisional = `种子${String(order).padStart(3, '0')}`;
-        const now = await this.clock.now();
-        const user = await this.prisma.$transaction(async (tx) => {
-          const row = await tx.user.create({
-            data: {
-              status: 'active',
-              nickname: provisional,
-              avatarUrl: null,
-              phone: null,
-              inviteCode: null,
-              member: false,
-              seated: false,
-              createdAt: now,
-              updatedAt: now,
-            },
-          });
-          await tx.userIdentity.create({
-            data: {
-              userId: row.id,
-              provider: IDENTITY_PROVIDERS.simulation,
-              identifier: `sim-${row.id.toString()}`,
-              unionId: null,
-              createdAt: now,
-            },
-          });
-          await tx.userPaymentPassword.create({
-            data: { userId: row.id, passwordHash: payHash, updatedAt: now },
-          });
-          return row;
+    const results: SimulatedRedPacketSignupResult[] = [];
+    // signup() 返回的 signedUpToday 对「刚报上」和「本来已报过」都是 true，
+    // 先按当前仿真时刻查一次当天报名，才能区分两种结果。
+    const now = await this.clock.now();
+    const bizDate = shanghaiBizDate(now);
+    for (const target of targets) {
+      try {
+        const existing = await this.prisma.redPacketSignup.findFirst({
+          where: { userId: target.id, bizDate },
         });
-        await this.users.bindInviter(user.id, root.inviteCode as string);
-        const bought = await this.purchaseOne(
-          { id: user.id, nickname: provisional },
-          'startup',
-          product.id,
-          1,
-          1,
-        );
-        const node = await this.prisma.marketTreeNode.findUnique({ where: { userId: user.id } });
-        if (
-          !node ||
-          !bought.ok ||
-          node.parentUserId === null ||
-          node.slot === null ||
-          node.depth === null
-        ) {
-          created.push({
-            userId: user.id.toString(),
-            nickname: provisional,
-            treePath: '',
-            parentPath: '',
-            slot: 0,
-            layer: 0,
-            invitedBy: 'R',
-            orderNo: bought.orderNo,
-            ok: false,
+        if (existing) {
+          results.push({
+            userId: target.id.toString(),
+            nickname: target.nickname,
+            outcome: 'already',
+            error: null,
           });
           continue;
         }
-        const parentLetters = lettersByUserId.get(node.parentUserId.toString()) ?? 'R';
-        const slotLetter = SLOT_LETTERS[node.slot - 1] ?? '?';
-        const treePath = parentLetters === 'R' ? slotLetter : `${parentLetters}${slotLetter}`;
-        lettersByUserId.set(user.id.toString(), treePath);
-        const layer = node.depth;
-        const parentPath = parentLetters;
-        const nickname = `L${layer}·${treePath}·父${parentPath}·邀R`;
-        const updated = await this.prisma.user.update({
-          where: { id: user.id },
-          data: { nickname },
+        await this.redPackets.signup(target.id);
+        results.push({
+          userId: target.id.toString(),
+          nickname: target.nickname,
+          outcome: 'signed',
+          error: null,
         });
-        await this.prisma.userAddress.updateMany({
-          where: { userId: user.id, contactName: provisional },
-          data: { contactName: nickname },
-        });
-        created.push({
-          userId: user.id.toString(),
-          nickname: updated.nickname,
-          treePath,
-          parentPath,
-          slot: node.slot,
-          layer,
-          invitedBy: 'R',
-          orderNo: bought.orderNo,
-          ok: true,
+      } catch (error) {
+        results.push({
+          userId: target.id.toString(),
+          nickname: target.nickname,
+          outcome: 'skipped',
+          error:
+            error instanceof ForbiddenException
+              ? '不具备报名资格（需会员且红包额度未领满）'
+              : error instanceof Error
+                ? error.message
+                : '报名失败',
         });
       }
     }
-    await this.append('seed_tree', { created: created.filter((item) => item.ok).length });
-    return {
-      reset: didReset,
-      layers,
-      product: { id: product.id.toString(), name: product.name },
-      created,
-    };
+    const signed = results.filter((item) => item.outcome === 'signed').length;
+    const alreadySigned = results.filter((item) => item.outcome === 'already').length;
+    await this.append('red_packet_signup', {
+      created: signed,
+      already: alreadySigned,
+      skipped: results.length - signed - alreadySigned,
+    });
+    return { total: results.length, signed, alreadySigned, skipped: results.length - signed - alreadySigned, results };
   }
 
   /** 任命角色。联合创始人走付费开通（有付款记录），工作室与运营中心走管理端指定。 */
@@ -651,10 +599,9 @@ export class SimulationService {
   /**
    * 清空业务数据，保留商品、内容、管理员与系统配置。
    * 根账户及其席位保留，否则新用户没有可挂靠的邀请人。
-   * 默认同时把仿真时钟拉回真实时间（重置后重新从「现在」开始演练）；
-   * seedTree 内部复用本方法时传 keepClock，避免把时钟倒回真实时间。
+   * 同时把仿真时钟拉回真实时间（重置后重新从「现在」开始演练）。
    */
-  async resetData(input: { keepClock?: boolean } = {}): Promise<{
+  async resetData(): Promise<{
     removedUsers: number;
     status: SimulationStatus;
   }> {
@@ -731,9 +678,7 @@ export class SimulationService {
       { timeout: 120_000, maxWait: 10_000 },
     );
     await this.rebuildSeatSlots();
-    if (!input.keepClock) {
-      await this.clearSimulatedClock();
-    }
+    await this.clearSimulatedClock();
     await this.append('reset_data', { created: removedUsers });
     this.logger.warn(`simulation business data reset, removed ${removedUsers} users`);
     return { removedUsers, status: await this.status() };
@@ -1062,23 +1007,9 @@ function diffOf(before: SimulationSnapshot, after: SimulationSnapshot): Simulati
   };
 }
 
-/** seedTree 返回的每个节点：按实际席位回填的树路径与昵称。 */
-export interface SeededTreeNode {
-  userId: string;
-  nickname: string;
-  /** 市场树路径（A/B/C=左/中/右）。空串表示没入座。 */
-  treePath: string;
-  parentPath: string;
-  slot: number;
-  layer: number;
-  invitedBy: string;
-  orderNo: string | null;
-  ok: boolean;
-}
-
 /**
  * 批量注册的邀请谱系序号：a、b、…、z、aa、ab…（26 进制小写）。
- * 大写字母段留给种子市场树路径，小写段表示从邀请人延伸出来的谱系。
+ * 大写字母段留给市场树路径，小写段表示从邀请人延伸出来的谱系。
  */
 function childLetters(index: number): string {
   let rest = index;

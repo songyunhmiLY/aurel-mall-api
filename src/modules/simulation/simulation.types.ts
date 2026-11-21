@@ -8,7 +8,7 @@ export type SimulationAction =
   | 'register'
   | 'purchase'
   | 'role'
-  | 'seed_tree'
+  | 'red_packet_signup'
   | 'reset'
   | 'reset_data';
 
@@ -50,8 +50,11 @@ export interface SimulationEvent {
     to?: string | null;
     byMinutes?: number;
     jobsAttempted?: boolean;
-    /** 本次造了多少人 / 多少单 / 任命了几个角色。 */
+    /** 本次造了多少人 / 多少单 / 任命了几个角色 / 报名成功人数。 */
     created?: number;
+    /** 红包报名：当天已报过的人数 / 未报上的人数。 */
+    already?: number;
+    skipped?: number;
     /** 时间推进时实际跑过 job 的时点个数。 */
     steps?: number;
   };
