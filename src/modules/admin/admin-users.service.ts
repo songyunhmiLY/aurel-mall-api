@@ -3,10 +3,27 @@ import type { Prisma, User } from '@prisma/client';
 import { USER_STATUS_ACTIVE, USER_STATUS_DISABLED } from '../../common/auth/user-status';
 import { ClockService } from '../../common/clock/clock.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { PRODUCT_ZONE_MALL, PRODUCT_ZONE_STARTUP } from '../catalog/catalog.constants';
+import { ORDER_PAID, ORDER_SHIPPED } from '../orders/order.constants';
+import { PAYMENT_PURPOSE_COFOUNDER } from '../payments/wechat-pay.constants';
 import { KYC_STATUS_VERIFIED } from '../users/kyc.constants';
 import { KycService, type KycView } from '../users/kyc.service';
 
-export interface AdminUserView {
+/** 订单已支付且未关闭的状态集合。closed 含退款关闭，不计入统计。 */
+const PAID_ORDER_STATUSES = [ORDER_PAID, ORDER_SHIPPED];
+
+export interface AdminUserStats {
+  /** 已支付且未关闭订单的微信实付合计（分），加联合创始人开通的微信支付。 */
+  paidWechatFen: number;
+  /** 创业专区已支付订单数。 */
+  startupPaidOrders: number;
+  /** 商城专区已支付订单数。 */
+  mallPaidOrders: number;
+  /** 直接邀请人数（邀请树上以该用户为上级的节点数）。 */
+  inviteeCount: number;
+}
+
+export interface AdminUserView extends AdminUserStats {
   id: bigint;
   status: string;
   nickname: string;
@@ -128,6 +145,7 @@ export class AdminUsersService {
       where: { userId: { in: ids }, status: KYC_STATUS_VERIFIED },
     });
     const verified = new Set(kycRows.map((row) => row.userId.toString()));
+    const stats = await this.collectStats(ids);
     return users.map((user) => ({
       id: user.id,
       status: user.status,
@@ -137,8 +155,68 @@ export class AdminUsersService {
       inviteCode: user.inviteCode,
       member: user.member,
       kycVerified: verified.has(user.id.toString()),
+      ...stats.get(user.id.toString()) ?? {
+        paidWechatFen: 0,
+        startupPaidOrders: 0,
+        mallPaidOrders: 0,
+        inviteeCount: 0,
+      },
       createdAt: user.createdAt.toISOString(),
       updatedAt: user.updatedAt.toISOString(),
     }));
+  }
+
+  /** 按用户聚合订单、邀请与开通支付统计。只查当前页用户，分页下开销可控。 */
+  private async collectStats(ids: bigint[]): Promise<Map<string, AdminUserStats>> {
+    const [orderRows, inviteRows, activationRows] = await Promise.all([
+      this.prisma.order.findMany({
+        where: { userId: { in: ids }, status: { in: PAID_ORDER_STATUSES } },
+      }),
+      this.prisma.inviteTreeNode.findMany({ where: { parentUserId: { in: ids } } }),
+      this.prisma.payment.findMany({
+        where: {
+          userId: { in: ids },
+          purpose: PAYMENT_PURPOSE_COFOUNDER,
+          status: 'success',
+        },
+      }),
+    ]);
+    const stats = new Map<string, AdminUserStats>();
+    for (const id of ids) {
+      stats.set(id.toString(), {
+        paidWechatFen: 0,
+        startupPaidOrders: 0,
+        mallPaidOrders: 0,
+        inviteeCount: 0,
+      });
+    }
+    for (const order of orderRows) {
+      const entry = stats.get(order.userId.toString());
+      if (!entry) {
+        continue;
+      }
+      entry.paidWechatFen += order.wechatFen;
+      if (order.zone === PRODUCT_ZONE_STARTUP) {
+        entry.startupPaidOrders += 1;
+      } else if (order.zone === PRODUCT_ZONE_MALL) {
+        entry.mallPaidOrders += 1;
+      }
+    }
+    for (const payment of activationRows) {
+      const entry = payment.userId === null ? undefined : stats.get(payment.userId.toString());
+      if (entry) {
+        entry.paidWechatFen += payment.amountFen;
+      }
+    }
+    for (const node of inviteRows) {
+      if (node.parentUserId === null) {
+        continue;
+      }
+      const entry = stats.get(node.parentUserId.toString());
+      if (entry) {
+        entry.inviteeCount += 1;
+      }
+    }
+    return stats;
   }
 }
