@@ -15,10 +15,14 @@ const PAID_ORDER_STATUSES = [ORDER_PAID, ORDER_SHIPPED];
 export interface AdminUserStats {
   /** 已支付且未关闭订单的微信实付合计（分），加联合创始人开通的微信支付。 */
   paidWechatFen: number;
-  /** 创业专区已支付订单数。 */
+  /** 创业专区已支付订单笔数。 */
   startupPaidOrders: number;
-  /** 商城专区已支付订单数。 */
+  /** 商城专区已支付订单笔数。 */
   mallPaidOrders: number;
+  /** 创业专区已支付商品件数（报单资格数）。 */
+  startupPaidUnits: number;
+  /** 商城专区已支付商品件数。 */
+  mallPaidUnits: number;
   /** 直接邀请人数（邀请树上以该用户为上级的节点数）。 */
   inviteeCount: number;
 }
@@ -159,6 +163,8 @@ export class AdminUsersService {
         paidWechatFen: 0,
         startupPaidOrders: 0,
         mallPaidOrders: 0,
+        startupPaidUnits: 0,
+        mallPaidUnits: 0,
         inviteeCount: 0,
       },
       createdAt: user.createdAt.toISOString(),
@@ -168,10 +174,10 @@ export class AdminUsersService {
 
   /** 按用户聚合订单、邀请与开通支付统计。只查当前页用户，分页下开销可控。 */
   private async collectStats(ids: bigint[]): Promise<Map<string, AdminUserStats>> {
-    const [orderRows, inviteRows, activationRows] = await Promise.all([
-      this.prisma.order.findMany({
-        where: { userId: { in: ids }, status: { in: PAID_ORDER_STATUSES } },
-      }),
+    const orderRows = await this.prisma.order.findMany({
+      where: { userId: { in: ids }, status: { in: PAID_ORDER_STATUSES } },
+    });
+    const [inviteRows, activationRows, itemRows] = await Promise.all([
       this.prisma.inviteTreeNode.findMany({ where: { parentUserId: { in: ids } } }),
       this.prisma.payment.findMany({
         where: {
@@ -180,6 +186,11 @@ export class AdminUsersService {
           status: 'success',
         },
       }),
+      orderRows.length > 0
+        ? this.prisma.orderItem.findMany({
+            where: { orderId: { in: orderRows.map((order) => order.id) } },
+          })
+        : Promise.resolve([]),
     ]);
     const stats = new Map<string, AdminUserStats>();
     for (const id of ids) {
@@ -187,8 +198,31 @@ export class AdminUsersService {
         paidWechatFen: 0,
         startupPaidOrders: 0,
         mallPaidOrders: 0,
+        startupPaidUnits: 0,
+        mallPaidUnits: 0,
         inviteeCount: 0,
       });
+    }
+    const orderByItem = new Map(
+      orderRows.map((order) => [
+        order.id.toString(),
+        { userId: order.userId.toString(), zone: order.zone as string },
+      ]),
+    );
+    for (const item of itemRows) {
+      const order = orderByItem.get(item.orderId.toString());
+      if (!order) {
+        continue;
+      }
+      const entry = stats.get(order.userId);
+      if (!entry) {
+        continue;
+      }
+      if (order.zone === PRODUCT_ZONE_STARTUP) {
+        entry.startupPaidUnits += item.quantity;
+      } else if (order.zone === PRODUCT_ZONE_MALL) {
+        entry.mallPaidUnits += item.quantity;
+      }
     }
     for (const order of orderRows) {
       const entry = stats.get(order.userId.toString());
