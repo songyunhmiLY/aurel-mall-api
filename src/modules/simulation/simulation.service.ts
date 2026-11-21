@@ -599,7 +599,8 @@ export class SimulationService {
   /**
    * 清空业务数据，保留商品、内容、管理员与系统配置。
    * 根账户及其席位保留，否则新用户没有可挂靠的邀请人。
-   * 同时把仿真时钟拉回真实时间（重置后重新从「现在」开始演练）。
+   * 同时把仿真时钟拉回真实时间，并清空时间轴——重置就是从零开始的一次新演练，
+   * 旧事件与旧差分留在列表里只会干扰观察。
    */
   async resetData(): Promise<{
     removedUsers: number;
@@ -679,7 +680,7 @@ export class SimulationService {
     );
     await this.rebuildSeatSlots();
     await this.clearSimulatedClock();
-    await this.append('reset_data', { created: removedUsers });
+    await this.store.clear();
     this.logger.warn(`simulation business data reset, removed ${removedUsers} users`);
     return { removedUsers, status: await this.status() };
   }

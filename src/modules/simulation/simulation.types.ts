@@ -9,8 +9,7 @@ export type SimulationAction =
   | 'purchase'
   | 'role'
   | 'red_packet_signup'
-  | 'reset'
-  | 'reset_data';
+  | 'reset';
 
 export interface SimulationSnapshot {
   /** 会员账户余额（分），按钱包类型汇总。 */
