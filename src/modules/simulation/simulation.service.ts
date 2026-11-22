@@ -379,6 +379,7 @@ export class SimulationService {
    * `L{层}·{邀请路径}{序号}·邀{邀请人路径}`，序号是 26 进制小写 a、b、…、z、aa…。
    * 路径大写字母段是市场树（A/B/C = 左/中/右），小写段是邀请谱系。
    * 每个用户都带上统一支付密码（SEED_PAYMENT_PASSWORD），演练资金操作不用逐个设置。
+   * 同时写入 preview 身份（sim{id}），H5 预览登录框输入即可登进该用户。
    */
   async registerBatch(input: { count: number; inviterUserId?: string }): Promise<{
     created: { id: string; nickname: string; invitePath: string }[];
@@ -413,6 +414,16 @@ export class SimulationService {
             userId: row.id,
             provider: IDENTITY_PROVIDERS.simulation,
             identifier: `sim-${row.id.toString()}`,
+            unionId: null,
+            createdAt: now,
+          },
+        });
+        // 同步补一条 H5 预览身份，演练中可在 H5 预览登录框输 sim{id} 以该用户登录。
+        await tx.userIdentity.create({
+          data: {
+            userId: row.id,
+            provider: IDENTITY_PROVIDERS.preview,
+            identifier: `sim${row.id.toString()}`,
             unionId: null,
             createdAt: now,
           },
