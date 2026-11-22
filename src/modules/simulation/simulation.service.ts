@@ -192,7 +192,8 @@ export class SimulationService {
     const settledSequences = settledFilings
       .map((row) => row.sequence)
       .filter((value): value is number => value !== null);
-    const unfiledOrders = new Set(unfiledRows.map((row) => row.orderId.toString())).size;
+    // 一单多件会拆成多条创业子单，按子单数计数才能反映真实待报单量。
+    const unfiledSubOrders = unfiledRows.length;
     return {
       clock: {
         now: clock.now.toISOString(),
@@ -206,7 +207,7 @@ export class SimulationService {
         paidAmountFen: paid._sum.payAmountFen ?? 0,
       },
       roles: { cofounders, studios, opsTeam },
-      filings: { completed: completedFilings, settledSequences, unfiledOrders },
+      filings: { completed: completedFilings, settledSequences, unfiledSubOrders },
       businessDate: shanghaiBizDate(clock.now),
     };
   }

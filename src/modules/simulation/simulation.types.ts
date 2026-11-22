@@ -93,11 +93,14 @@ export interface SimulationOverview {
     studios: number;
     opsTeam: number;
   };
-  /** 全网公排：已完成报单数、已返现的序号、尚未报单的创业订单数。 */
+  /**
+   * 全网公排：已完成报单数、已返现的序号、尚未参与公排的创业子单数。
+   * 一个订单可拆出多个子单（每件一份），这里按子单计数，不按订单笔数。
+   */
   filings: {
     completed: number;
     settledSequences: number[];
-    unfiledOrders: number;
+    unfiledSubOrders: number;
   };
   businessDate: string;
 }
