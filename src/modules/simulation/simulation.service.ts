@@ -859,6 +859,11 @@ export class SimulationService {
       },
       { timeout: 120_000, maxWait: 10_000 },
     );
+    // 用户表自增 ID 拉回 1（表里只剩根账户，MySQL 会自动取 max(id)+1 兜底）。
+    // ALTER TABLE 是 DDL，会隐式提交，不能放进上面的事务里。
+    // 不重置的话，反复重置后新用户编号会一直涨，演练里看着像有历史残留。
+    // 只处理 users 表，其余表的自增不回退。
+    await this.prisma.$executeRawUnsafe('ALTER TABLE `users` AUTO_INCREMENT = 1');
     await this.rebuildSeatSlots();
     await this.clearSimulatedClock();
     await this.store.clear();
