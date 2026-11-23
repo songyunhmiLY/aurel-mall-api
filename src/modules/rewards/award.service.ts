@@ -136,8 +136,10 @@ export class AwardService {
   }
 
   /**
-   * 1–4 层不设门槛。5–8 层要有至少 3 笔创业子单、合计至少 3N，以及至少 3 名邀请直接会员。
-   * 9–12 层把 3 换成 5。某一层不够就跳过，继续往上。13 层及以上不发。
+   * 1–4 层不设门槛。5–8 层按 STARTUP_POINT_MID_GATE（默认 3:3:3：
+   * 创业子单笔数:合计金额倍数 N:邀请直接会员数）。
+   * 9–12 层按 STARTUP_POINT_HIGH_GATE（默认 5:5:3），直推会员数不随层提高。
+   * 某一层不够就跳过，继续往上。13 层及以上不发。
    * 直接会员指邀请关系下已经入座的人。
    */
   private async startupLayerQualifies(tx: Tx, userId: bigint, layer: number): Promise<boolean> {
@@ -147,11 +149,15 @@ export class AwardService {
     if (layer > STARTUP_LAYER_MAX) {
       return false;
     }
-    const need = layer <= 8 ? 3 : 5;
+    const gate = layer <= 8 ? this.locked.startupPointMidGate : this.locked.startupPointHighGate;
     const volume = await this.startupVolume(tx, userId);
     const invites = await this.directInviteMembers(tx, userId);
-    const threshold = BigInt(this.locked.startupZoneUnitPriceFen) * BigInt(need);
-    return volume.count >= need && volume.totalFen >= threshold && invites >= need;
+    const threshold = BigInt(this.locked.startupZoneUnitPriceFen) * BigInt(gate.totalUnits);
+    return (
+      volume.count >= gate.minSubOrders &&
+      volume.totalFen >= threshold &&
+      invites >= gate.minInvites
+    );
   }
 
   private async startupVolume(

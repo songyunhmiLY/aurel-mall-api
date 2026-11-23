@@ -88,6 +88,8 @@ export function lockedConfig(startupZoneUnitPriceFen: number): LockedRuntimeConf
     filingDailyCheckTime: '00:01',
     startupSalesRatioBps: 0,
     startupPointRatioBps: 0,
+    startupPointMidGate: Object.freeze({ minSubOrders: 3, totalUnits: 3, minInvites: 3 }),
+    startupPointHighGate: Object.freeze({ minSubOrders: 5, totalUnits: 5, minInvites: 3 }),
     startupAwardSplit: Object.freeze({
       withdrawableBps: 8500,
       pointsBps: 500,

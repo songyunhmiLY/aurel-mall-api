@@ -61,13 +61,11 @@ export class SimulatePurchaseDto {
   @IsOptional()
   @IsInt()
   @Min(1)
-  @Max(99)
   quantityMin?: number;
 
   @IsOptional()
   @IsInt()
   @Min(1)
-  @Max(99)
   quantityMax?: number;
 }
 

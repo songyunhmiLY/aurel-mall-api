@@ -10,6 +10,15 @@ export interface PositionPoolTier {
   poolBps: number;
 }
 
+export interface StartupPointGateTier {
+  /** 收款人名下创业子单笔数下限。 */
+  minSubOrders: number;
+  /** 创业子单合计金额下限，单位是创业专区单价 N 的倍数。 */
+  totalUnits: number;
+  /** 邀请关系下已入座直接会员数量下限。 */
+  minInvites: number;
+}
+
 /**
  * 需求 §1.1 中不允许在管理端修改的运行时配置。
  * 只在进程启动时从环境变量解析一次，对象被冻结。
@@ -27,6 +36,14 @@ export interface LockedRuntimeConfig {
   filingDailyCheckTime: string;
   startupSalesRatioBps: number;
   startupPointRatioBps: number;
+  /**
+   * 创业专区见点奖收款门槛。格式「子单笔数:金额倍数N:直接会员数」。
+   * 第 5–8 层用 startupPointMidGate（默认 3:3:3），
+   * 第 9–12 层用 startupPointHighGate（默认 5:5:3，直推会员数不随层提高）。
+   * 未配置时按默认值启动，不要求 .env 里有这两项。
+   */
+  startupPointMidGate: StartupPointGateTier;
+  startupPointHighGate: StartupPointGateTier;
   startupAwardSplit: WalletSplit;
   mallSalesRatioBps: number;
   mallPointRatioBps: number;
@@ -103,6 +120,16 @@ export function parseLockedRuntimeConfig(source: NodeJS.ProcessEnv): LockedRunti
   const startupAwardSplit = readSplit(source, 'STARTUP_AWARD');
   const mallAwardSplit = readSplit(source, 'MALL_AWARD');
   const positionDividendPools = readPositionPools(source.POSITION_DIVIDEND_POOL_BPS);
+  const startupPointMidGate = readStartupPointGate(source, 'STARTUP_POINT_MID_GATE', {
+    minSubOrders: 3,
+    totalUnits: 3,
+    minInvites: 3,
+  });
+  const startupPointHighGate = readStartupPointGate(source, 'STARTUP_POINT_HIGH_GATE', {
+    minSubOrders: 5,
+    totalUnits: 5,
+    minInvites: 3,
+  });
 
   return Object.freeze({
     startupZoneUnitPriceFen: readInt(source, 'STARTUP_ZONE_UNIT_PRICE_FEN', { min: 0 }),
@@ -119,6 +146,8 @@ export function parseLockedRuntimeConfig(source: NodeJS.ProcessEnv): LockedRunti
       min: 0,
       max: BPS_MAX,
     }),
+    startupPointMidGate,
+    startupPointHighGate,
     startupAwardSplit,
     mallSalesRatioBps: readInt(source, 'MALL_SALES_AWARD_RATIO_BPS', { min: 0, max: BPS_MAX }),
     mallPointRatioBps: readInt(source, 'MALL_POINT_AWARD_RATIO_BPS', { min: 0, max: BPS_MAX }),
@@ -149,6 +178,32 @@ export function parseLockedRuntimeConfig(source: NodeJS.ProcessEnv): LockedRunti
       min: 0,
       max: BPS_MAX,
     }),
+  });
+}
+
+function readStartupPointGate(
+  source: NodeJS.ProcessEnv,
+  key: string,
+  fallback: StartupPointGateTier,
+): StartupPointGateTier {
+  const raw = source[key];
+  if (raw === undefined || raw.trim() === '') {
+    return fallback;
+  }
+  const pieces = raw
+    .split(':')
+    .map((piece) => piece.trim());
+  if (pieces.length !== 3 || pieces.some((piece) => !/^\d+$/.test(piece))) {
+    throw new Error(`环境变量 ${key} 必须是 子单笔数:金额倍数:直接会员数，例如 3:3:3`);
+  }
+  const values = pieces.map((piece) => Number(piece));
+  if (values.some((value) => !Number.isSafeInteger(value))) {
+    throw new Error(`环境变量 ${key} 超出安全整数范围`);
+  }
+  return Object.freeze({
+    minSubOrders: values[0] as number,
+    totalUnits: values[1] as number,
+    minInvites: values[2] as number,
   });
 }
 

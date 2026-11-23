@@ -119,6 +119,47 @@ describe('locked runtime config', () => {
     );
   });
 
+  it('parses the startup point layer gates with defaults and overrides', () => {
+    const env = parseAppEnv(example);
+    expect(env.locked.startupPointMidGate).toEqual({
+      minSubOrders: 3,
+      totalUnits: 3,
+      minInvites: 3,
+    });
+    expect(env.locked.startupPointHighGate).toEqual({
+      minSubOrders: 5,
+      totalUnits: 5,
+      minInvites: 3,
+    });
+    const overridden = parseAppEnv({
+      ...example,
+      STARTUP_POINT_MID_GATE: '2:2:2',
+      STARTUP_POINT_HIGH_GATE: '6:4:2',
+    });
+    expect(overridden.locked.startupPointMidGate).toEqual({
+      minSubOrders: 2,
+      totalUnits: 2,
+      minInvites: 2,
+    });
+    expect(overridden.locked.startupPointHighGate).toEqual({
+      minSubOrders: 6,
+      totalUnits: 4,
+      minInvites: 2,
+    });
+    const blank = parseAppEnv({ ...example, STARTUP_POINT_MID_GATE: ' ' });
+    expect(blank.locked.startupPointMidGate).toEqual({
+      minSubOrders: 3,
+      totalUnits: 3,
+      minInvites: 3,
+    });
+    expect(() => parseAppEnv({ ...example, STARTUP_POINT_HIGH_GATE: '5:5' })).toThrow(
+      /STARTUP_POINT_HIGH_GATE/,
+    );
+    expect(() => parseAppEnv({ ...example, STARTUP_POINT_HIGH_GATE: '5:5:x' })).toThrow(
+      /STARTUP_POINT_HIGH_GATE/,
+    );
+  });
+
   it('rejects a wallet split that does not add up to 10000', () => {
     expect(() => parseAppEnv({ ...example, STARTUP_AWARD_WITHDRAWABLE_BPS: '2000' })).toThrow(
       /STARTUP_AWARD/,
