@@ -61,9 +61,15 @@ export function describeWelfareQuota(
 /**
  * 奖池和每人份额都向下取整。份额 × 人数不会超过奖池。
  * 余数不发给任何人，留在系统。人数为 0 时整池都是余数。
+ * 传入 overridePoolFen 时直接用它当奖池（管理端指定日期金额池），忽略销售额计提。
  */
-export function splitPool(salesFen: bigint, accrualBps: number, signupCount: number): PoolSplit {
-  const poolFen = applyBps(salesFen, accrualBps);
+export function splitPool(
+  salesFen: bigint,
+  accrualBps: number,
+  signupCount: number,
+  overridePoolFen?: bigint,
+): PoolSplit {
+  const poolFen = overridePoolFen ?? applyBps(salesFen, accrualBps);
   if (signupCount <= 0) {
     return { poolFen, shareFen: 0n, distributedFen: 0n, remainderFen: poolFen };
   }

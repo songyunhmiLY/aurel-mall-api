@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ForbiddenException,
+  NotFoundException,
   UnauthorizedException,
   ValidationPipe,
 } from '@nestjs/common';
@@ -612,6 +613,50 @@ describe('welfare red packet', () => {
       stage.db.redPacketDailyAccrual.rows.find((row) => row.bizDate === '2026-04-02'),
     ).toMatchObject({ signupCount: 0, distributedFen: 0n, remainderFen: 0n });
     expect(stage.db.redPacketPayout.rows).toHaveLength(1);
+  });
+
+  it('uses the admin pool override on the configured day and rejects settled days', async () => {
+    const stage = buildStage4(welfareLocked({ redPacketRoundPayThresholdFen: 100 }));
+    const rootId = await boot(stage);
+    stage.clock.current = APR1_1000;
+    const buyer = await loginBuyer(stage, 'pool', rootId);
+    const product = await startupProduct(stage, '指定池', 6);
+    await buyStartup(stage, buyer, product.id, 3);
+    await stage.redPackets.signup(buyer);
+
+    await expect(
+      stage.welfareAdmin.setPoolOverride({ bizDate: 'no-date', amountFen: '500' }, 7n),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    await expect(
+      stage.welfareAdmin.setPoolOverride({ bizDate: '2026-04-01', amountFen: '-5' }, 7n),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(
+      await stage.welfareAdmin.setPoolOverride({ bizDate: '2026-04-01', amountFen: '500' }, 7n),
+    ).toMatchObject({ bizDate: '2026-04-01', amountFen: 500n, settled: false });
+    // 同一天重复设置会覆盖旧金额。
+    expect(
+      await stage.welfareAdmin.setPoolOverride({ bizDate: '2026-04-01', amountFen: '700' }, 7n),
+    ).toMatchObject({ amountFen: 700n });
+
+    stage.clock.current = APR2_0100;
+    await stage.jobs.runDue();
+    expect(
+      stage.db.redPacketDailyAccrual.rows.find((row) => row.bizDate === '2026-04-01'),
+    ).toMatchObject({ startupSalesFen: 300n, accrualFen: 700n, signupCount: 1, shareFen: 700n });
+    expect(packetCredits(stage, buyer).map((row) => row.amountFen)).toEqual([700n]);
+
+    await expect(
+      stage.welfareAdmin.setPoolOverride({ bizDate: '2026-04-01', amountFen: '900' }, 7n),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(await stage.welfareAdmin.listPoolOverrides()).toMatchObject([
+      { bizDate: '2026-04-01', amountFen: 700n, settled: true },
+    ]);
+
+    await stage.welfareAdmin.deletePoolOverride('2026-04-01');
+    expect(await stage.welfareAdmin.listPoolOverrides()).toEqual([]);
+    await expect(stage.welfareAdmin.deletePoolOverride('2026-04-01')).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
   });
 
   it('stores the home entry in admin settings and keeps K, C, and the rate out of that write', async () => {

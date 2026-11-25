@@ -494,12 +494,17 @@ T **不是**锁定项。单位是分，比较的是市场里创业专区已支�
 
 当天奖池 = floor(当日创业专区已支付订单的 `goods_total_fen` × 万分比 / 10000)。`goods_total_fen` 就是销售奖使用的商品金额 N × 件数，含钱包支付的货款，不含运费，不含商城订单。状态只取 `paid` 和 `shipped`。没人报名时，奖池留在系统，不分配。有人报名时每人份额 = floor(奖池 / 报名人数)。份额乘人数不会超过奖池，余下的分留在系统，记在 `remainder_fen`。份额不因本人当天有没有下单、下了多少、开了几轮而变化。份额大于剩余上限时仍发全额，超出的部分计入累计已领：下一轮还没开则暂停资格，下一轮已经开着则可以继续报名。
 
+管理端可以为指定上海自然日设置固定金额池，覆盖上面的销售额计提：结算某一天时，如果 `red_packet_pool_overrides` 里有这天的记录，就直接用设置金额当奖池，当天销售额仍记在 `startup_sales_fen` 供参考；没有设置的日期照常按比例计提。设置必须在当天结算前完成，已结算的日期拒绝设置和修改；删除设置随时可以，但只影响未结算的日子。设置金额可以低于或高于计提结果（比如 0 表示当日不发红包），均分、余数、上限规则不变。
+
 红包 100% 进入可提现账户，来源编码 `red_packet`，显示分类默认是「系统红包」。不拆积分或消费账户。创业专区不能退款，这里不做资格回滚。
 
 需要管理员令牌：
 
 - `GET /api/v1/admin/welfare/entry`
 - `PUT /api/v1/admin/welfare/entry`，body：`{ "copy": "抢红包", "imageUrl": "https://cdn.example.com/welfare.png" }`。`imageUrl` 可省略或传空字符串，表示没有图片。文案最长 200，图片地址最长 512。多出来的字段会被拒绝，因此不能从这里改 K、C 或比例。
+- `GET /api/v1/admin/welfare/pool-overrides`，`data` 为数组，每项 `{ "bizDate", "amountFen", "settled", "updatedAt" }`，按日期倒序。`settled` 表示该日红包已结算，设置不会再生效。
+- `PUT /api/v1/admin/welfare/pool-overrides`，body：`{ "bizDate": "2026-04-01", "amountFen": "100000" }`。`amountFen` 是十进制分字符串，非负整数，单日上限 2147483647 分。同一天重复设置会覆盖旧值。
+- `DELETE /api/v1/admin/welfare/pool-overrides/:bizDate`。没有设置过返回 404。
 - `GET /api/v1/admin/welfare/signups?userId=&bizDate=&page=&pageSize=`
 - `GET /api/v1/admin/welfare/participants?userId=&page=&pageSize=`
 

@@ -7,19 +7,28 @@ import {
 import type { Prisma, User } from '@prisma/client';
 import { USER_STATUS_ACTIVE } from '../../../common/auth/user-status';
 import { ClockService } from '../../../common/clock/clock.service';
-import { shanghaiBizDate } from '../../../common/clock/shanghai-calendar';
+import { isShanghaiBizDate, shanghaiBizDate } from '../../../common/clock/shanghai-calendar';
 import { PrismaService } from '../../../common/prisma/prisma.service';
 import {
   WELFARE_ENTRY_COPY_KEY,
   WELFARE_ENTRY_COPY_MAX,
   WELFARE_ENTRY_IMAGE_KEY,
   WELFARE_ENTRY_IMAGE_MAX,
+  WELFARE_POOL_OVERRIDE_MAX_FEN,
 } from './red-packet.constants';
 import { RedPacketService, type WelfareQuote } from './red-packet.service';
 
 export interface WelfareEntryView {
   copy: string;
   imageUrl: string | null;
+}
+
+export interface WelfarePoolOverrideView {
+  bizDate: string;
+  amountFen: bigint;
+  /** 对应日期红包已结算的，设置不会再生效。 */
+  settled: boolean;
+  updatedAt: Date;
 }
 
 export interface WelfareSignupView {
@@ -88,6 +97,81 @@ export class RedPacketAdminService {
     await this.writeSetting(WELFARE_ENTRY_COPY_KEY, copy, adminId, now);
     await this.writeSetting(WELFARE_ENTRY_IMAGE_KEY, imageUrl, adminId, now);
     return this.getEntry();
+  }
+
+  async listPoolOverrides(): Promise<WelfarePoolOverrideView[]> {
+    const [overrides, accruals] = await Promise.all([
+      this.prisma.redPacketPoolOverride.findMany({ orderBy: { bizDate: 'desc' } }),
+      this.prisma.redPacketDailyAccrual.findMany({ orderBy: { bizDate: 'desc' } }),
+    ]);
+    const settled = new Set(
+      accruals.filter((row) => row.settledAt !== null).map((row) => row.bizDate),
+    );
+    return overrides.map((row) => ({
+      bizDate: row.bizDate,
+      amountFen: row.amountFen,
+      settled: settled.has(row.bizDate),
+      updatedAt: row.updatedAt,
+    }));
+  }
+
+  /** 为指定上海自然日设置固定红包金额池。已结算的日期拒绝设置。 */
+  async setPoolOverride(
+    input: { bizDate: string; amountFen: string },
+    adminId: bigint,
+  ): Promise<WelfarePoolOverrideView> {
+    const bizDate = assertPoolBizDate(input.bizDate);
+    const amountFen = assertPoolAmountFen(input.amountFen);
+    const now = await this.clock.now();
+    const accrual = await this.prisma.redPacketDailyAccrual.findUnique({
+      where: { bizDate },
+      select: { settledAt: true },
+    });
+    if (accrual?.settledAt) {
+      throw new BadRequestException('该日期红包已结算，不能再设置金额池');
+    }
+    await this.prisma.$transaction(async (tx) => {
+      // 和结算同一条锁顺序，避免设置金额池和当日结算并发交错。
+      await tx.$queryRaw`
+        SELECT id FROM red_packet_daily_accruals WHERE biz_date = ${bizDate} FOR UPDATE
+      `;
+      const accrual = await tx.redPacketDailyAccrual.findUnique({
+        where: { bizDate },
+        select: { settledAt: true },
+      });
+      if (accrual?.settledAt) {
+        throw new BadRequestException('该日期红包已结算，不能再设置金额池');
+      }
+      const existing = await tx.redPacketPoolOverride.findUnique({ where: { bizDate } });
+      const data = { amountFen, updatedByAdminId: adminId, updatedAt: now };
+      if (existing) {
+        await tx.redPacketPoolOverride.update({ where: { bizDate }, data });
+      } else {
+        try {
+          await tx.redPacketPoolOverride.create({
+            data: { ...data, bizDate, createdAt: now },
+          });
+        } catch (error) {
+          if (!isUniqueConflict(error)) {
+            throw error;
+          }
+          await tx.redPacketPoolOverride.update({ where: { bizDate }, data });
+        }
+      }
+    });
+    return { bizDate, amountFen, settled: false, updatedAt: now };
+  }
+
+  async deletePoolOverride(bizDateRaw: string): Promise<void> {
+    const bizDate = assertPoolBizDate(bizDateRaw);
+    try {
+      await this.prisma.redPacketPoolOverride.delete({ where: { bizDate } });
+    } catch (error) {
+      if (isNotFound(error)) {
+        throw new NotFoundException('该日期没有设置金额池');
+      }
+      throw error;
+    }
   }
 
   async listSignups(query: {
@@ -288,6 +372,28 @@ function assertImage(imageUrl: string | null | undefined): string {
     throw new BadRequestException('入口图片地址过长');
   }
   return value;
+}
+
+function assertPoolBizDate(raw: string): string {
+  if (typeof raw !== 'string' || !isShanghaiBizDate(raw.trim())) {
+    throw new BadRequestException('日期不正确');
+  }
+  return raw.trim();
+}
+
+function assertPoolAmountFen(raw: string): bigint {
+  if (typeof raw !== 'string' || !/^\d{1,12}$/.test(raw.trim())) {
+    throw new BadRequestException('金额不正确');
+  }
+  const value = BigInt(raw.trim());
+  if (value > BigInt(WELFARE_POOL_OVERRIDE_MAX_FEN)) {
+    throw new BadRequestException('金额超出上限');
+  }
+  return value;
+}
+
+function isNotFound(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && 'code' in error && error.code === 'P2025';
 }
 
 function isUniqueConflict(error: unknown): boolean {

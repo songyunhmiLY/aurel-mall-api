@@ -402,6 +402,7 @@ export class Stage1Db {
   readonly positionDividendExclusion = new MemoryTable([['periodId', 'userId']]);
   readonly positionDividendRecord = new MemoryTable([['periodId', 'userId', 'positionCode']]);
   readonly redPacketDailyAccrual = new MemoryTable([['bizDate']]);
+  readonly redPacketPoolOverride = new MemoryTable([['bizDate']]);
   readonly redPacketSignup = new MemoryTable([['userId', 'bizDate']]);
   readonly redPacketPayout = new MemoryTable([['userId', 'bizDate']]);
   readonly cofounderEnrollment = new MemoryTable([]);
@@ -569,6 +570,7 @@ export class Stage1Db {
       this.positionDividendExclusion,
       this.positionDividendRecord,
       this.redPacketDailyAccrual,
+      this.redPacketPoolOverride,
       this.redPacketSignup,
       this.redPacketPayout,
       this.cofounderEnrollment,

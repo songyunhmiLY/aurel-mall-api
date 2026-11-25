@@ -42,6 +42,7 @@ export interface WelfareQuote extends WelfareQuota {
  * 福利专场。会员看到的只有能不能报名、今天有没有报过名。
  * 轮次、上限和已领金额只给管理端。
  * 报名立即生效。前一个上海自然日在每日报单检查的同一个钟点结算，默认 00:01。
+ * 管理端可为指定自然日设置固定金额池，结算时覆盖按销售额计提的奖池。
  */
 @Injectable()
 export class RedPacketService {
@@ -174,7 +175,12 @@ export class RedPacketService {
           where: { bizDate },
           orderBy: [{ userId: 'asc' }, { id: 'asc' }],
         });
-        const split = splitPool(salesFen, this.locked.redPacketDailyAccrualBps, signups.length);
+        const split = splitPool(
+          salesFen,
+          this.locked.redPacketDailyAccrualBps,
+          signups.length,
+          (await tx.redPacketPoolOverride.findUnique({ where: { bizDate } }))?.amountFen,
+        );
         if (split.shareFen > 0n) {
           for (const signup of signups) {
             await this.payShare(tx, signup.userId, bizDate, split.shareFen, now);

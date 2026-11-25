@@ -208,6 +208,19 @@ model RedPacketDailyAccrual {
   @@map("red_packet_daily_accruals")
 }
 
+/// 管理端为指定上海自然日设置的红包金额池。该日结算时用它覆盖按销售额计提的奖池；
+/// 没有设置的日期仍按锁定比例计提。已结算的日期不允许再设置或修改。
+model RedPacketPoolOverride {
+  id               BigInt   @id @default(autoincrement())
+  bizDate          String   @unique(map: "red_packet_pool_overrides_biz_date_uq") @map("biz_date") @db.Char(10)
+  amountFen        BigInt   @map("amount_fen")
+  updatedByAdminId BigInt?  @map("updated_by_admin_id")
+  updatedAt        DateTime @map("updated_at") @db.DateTime(3)
+  createdAt        DateTime @map("created_at") @db.DateTime(3)
+
+  @@map("red_packet_pool_overrides")
+}
+
 /// 会员在某个上海自然日点击抢红包。同一用户同一天一行。
 /// 资格在点击时判断。结算按这一行均分，不因开了更多轮而放大份额。
 model RedPacketSignup {

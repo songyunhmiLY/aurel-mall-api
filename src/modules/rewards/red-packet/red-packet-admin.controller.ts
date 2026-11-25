@@ -1,10 +1,21 @@
-import { BadRequestException, Body, Controller, Get, Put, Query, UseGuards } from '@nestjs/common';
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Put,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
 import { AdminJwtGuard } from '../../../common/auth/admin-jwt.guard';
 import type { AdminPrincipal } from '../../../common/auth/admin-principal';
 import { CurrentAdmin } from '../../../common/auth/current-admin.decorator';
 import { isShanghaiBizDate } from '../../../common/clock/shanghai-calendar';
 import { parsePage, parsePageSize, parseRouteId } from '../../../common/http/parse-id';
 import { UpdateWelfareEntryDto } from './dto/update-welfare-entry.dto';
+import { UpdateWelfarePoolOverrideDto } from './dto/update-welfare-pool-override.dto';
 import { RedPacketAdminService } from './red-packet-admin.service';
 
 @Controller('admin/welfare')
@@ -20,6 +31,24 @@ export class WelfareAdminController {
   @Put('entry')
   setEntry(@CurrentAdmin() admin: AdminPrincipal, @Body() body: UpdateWelfareEntryDto) {
     return this.welfare.setEntry(body, admin.id);
+  }
+
+  @Get('pool-overrides')
+  poolOverrides() {
+    return this.welfare.listPoolOverrides();
+  }
+
+  @Put('pool-overrides')
+  setPoolOverride(
+    @CurrentAdmin() admin: AdminPrincipal,
+    @Body() body: UpdateWelfarePoolOverrideDto,
+  ) {
+    return this.welfare.setPoolOverride(body, admin.id);
+  }
+
+  @Delete('pool-overrides/:bizDate')
+  deletePoolOverride(@Param('bizDate') bizDate?: string) {
+    return this.welfare.deletePoolOverride(bizDate ?? '');
   }
 
   @Get('signups')
