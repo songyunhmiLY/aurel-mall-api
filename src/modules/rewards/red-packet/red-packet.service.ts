@@ -39,6 +39,15 @@ export interface WelfareQuote extends WelfareQuota {
 }
 
 /**
+ * 演练专用：本次推进给指定业务日一个临时金额池，只影响这一次结算，不写入管理端设置。
+ * 与后台指定日期金额池、默认计提的优先级为：演练金额 > 后台金额 > 按比例计提。
+ */
+export interface RedPacketPoolHint {
+  bizDate: string;
+  amountFen: bigint;
+}
+
+/**
  * 福利专场。会员看到的只有能不能报名、今天有没有报过名。
  * 轮次、上限和已领金额只给管理端。
  * 报名立即生效。前一个上海自然日在每日报单检查的同一个钟点结算，默认 00:01。
@@ -108,8 +117,9 @@ export class RedPacketService {
    * 结算已经结束、并且当日检查钟点已到的上海自然日。
    * 今天 00:01 结算昨天。00:01 之前不结算昨天。
    * 重跑同一天不会再次入账。
+   * hint 只在仿真推进里传，命中的业务日用它的金额池结算。
    */
-  async runDue(): Promise<void> {
+  async runDue(hint?: RedPacketPoolHint): Promise<void> {
     const now = await this.clock.now();
     const latest = this.latestSettleableBizDate(now);
     const anchor = await this.prisma.redPacketDailyAccrual.findFirst({
@@ -127,12 +137,12 @@ export class RedPacketService {
       cursor = anchor.bizDate;
     }
     while (cursor <= latest) {
-      await this.settleDay(cursor, now);
+      await this.settleDay(cursor, now, hint);
       cursor = nextShanghaiDate(cursor);
     }
   }
 
-  private async settleDay(bizDate: string, now: Date): Promise<void> {
+  private async settleDay(bizDate: string, now: Date, hint?: RedPacketPoolHint): Promise<void> {
     const existing = await this.prisma.redPacketDailyAccrual.findUnique({ where: { bizDate } });
     if (existing?.settledAt) {
       return;
@@ -175,11 +185,15 @@ export class RedPacketService {
           where: { bizDate },
           orderBy: [{ userId: 'asc' }, { id: 'asc' }],
         });
+        // 优先级：演练本次填写的金额 > 管理端为这一天设置的金额池 > 按销售额计提。
+        const simulatedFen = hint && hint.bizDate === bizDate ? hint.amountFen : undefined;
+        const configFen = (await tx.redPacketPoolOverride.findUnique({ where: { bizDate } }))
+          ?.amountFen;
         const split = splitPool(
           salesFen,
           this.locked.redPacketDailyAccrualBps,
           signups.length,
-          (await tx.redPacketPoolOverride.findUnique({ where: { bizDate } }))?.amountFen,
+          simulatedFen ?? configFen,
         );
         if (split.shareFen > 0n) {
           for (const signup of signups) {

@@ -61,8 +61,7 @@ function buildSimulation(
   enabled: boolean,
   overrides: Partial<AppEnv> = {},
   locked = stage4Locked(),
-) {
-  const stage = buildStage4(locked);
+) {  const stage = buildStage4(locked);
   const clock = withOverride(stage.clock);
   const runnerCalls: string[] = [];
   const runner = {
@@ -95,6 +94,35 @@ function buildSimulation(
     env,
   );
   return { stage, clock, runnerCalls, service };
+}
+
+/** 真实到期任务 runner 的仿真服务：推进时的红包结算会真的落库。 */
+function buildSimulationWithJobs(locked = stage4Locked()) {
+  const stage = buildStage4(locked);
+  const clock = withOverride(stage.clock);
+  const env: AppEnv = {
+    ...stage.env,
+    locked,
+    simulationEnabled: true,
+    allowClockOverride: true,
+  };
+  const service = new SimulationService(
+    clock as unknown as ClockService,
+    stage.jobs,
+    stage.db as unknown as PrismaService,
+    stage.users,
+    stage.orders,
+    stage.wechatPay,
+    {} as unknown as CofounderPayService,
+    stage.cofounderSettings,
+    {} as unknown as CofounderEnrollmentService,
+    {} as unknown as StudioEnrollmentService,
+    {} as unknown as OpsTeamEnrollmentService,
+    stage.redPackets,
+    new MemoryStore(),
+    env,
+  );
+  return { stage, service };
 }
 
 describe('simulation actions', () => {
@@ -369,6 +397,122 @@ describe('simulation actions', () => {
     expect(again.skipped).toBe(1);
     expect(again.results[1]!.outcome).toBe('skipped');
     expect(clock.current.toISOString()).toBe('2026-01-02T05:00:00.000Z');
+  });
+
+  it('settles the simulated day with the pool typed on the advance form', async () => {
+    const locked = {
+      ...stage4Locked(),
+      redPacketDailyAccrualBps: 300,
+      redPacketRoundPayThresholdFen: 100_000,
+      redPacketRoundClaimCapFen: 5_000,
+    };
+    const { stage, service } = buildSimulationWithJobs(locked);
+    await stage.users.onModuleInit();
+    const product = await stage.catalog.create({
+      zone: 'startup',
+      name: '创业礼包',
+      freightFen: 0,
+      stockQuantity: 999,
+      status: 'on',
+    });
+    await service.setClock('2026-01-02T05:00:00.000Z');
+    const registered = await service.registerBatch({ count: 2 });
+    const buyerId = registered.created[0]!.id;
+    await service.purchaseBatch({
+      zone: 'startup',
+      userIds: [buyerId],
+      productId: product.product.id.toString(),
+    });
+    const signup = await service.redPacketSignup({ userIds: [buyerId] });
+    expect(signup.signed).toBe(1);
+
+    const context = await service.redPacketPoolContext();
+    expect(context.bizDate).toBe('2026-01-02');
+    expect(context.settleAt).toBe('2026-01-02T16:01:00.000Z');
+    expect(context.settled).toBe(false);
+    expect(context.adminAmountFen).toBeNull();
+    expect(context.signupCount).toBe(1);
+    expect(context.accrualBps).toBe(300);
+    expect(BigInt(context.salesFen)).toBeGreaterThan(0n);
+    expect(BigInt(context.defaultPoolFen)).toBeGreaterThan(0n);
+
+    const advanced = await service.advance({
+      to: '2026-01-03T05:00:00.000Z',
+      redPacketPoolFen: '12345',
+    });
+
+    expect(advanced.redPacketPool).toEqual({
+      bizDate: '2026-01-02',
+      amountFen: '12345',
+      applied: true,
+    });
+    const accrual = stage.db.redPacketDailyAccrual.rows.find((row) => row.bizDate === '2026-01-02')!;
+    expect(accrual.accrualFen).toBe(12345n);
+    expect(accrual.shareFen).toBe(12345n);
+    expect(accrual.distributedFen).toBe(12345n);
+    const payout = stage.db.redPacketPayout.rows.find((row) => row.bizDate === '2026-01-02')!;
+    expect(payout.amountFen).toBe(12345n);
+  });
+
+  it('falls back to the admin date pool when the simulation field is empty', async () => {
+    const locked = {
+      ...stage4Locked(),
+      redPacketRoundPayThresholdFen: 100_000,
+      redPacketRoundClaimCapFen: 5_000,
+    };
+    const { stage, service } = buildSimulationWithJobs(locked);
+    await stage.users.onModuleInit();
+    const product = await stage.catalog.create({
+      zone: 'startup',
+      name: '创业礼包',
+      freightFen: 0,
+      stockQuantity: 999,
+      status: 'on',
+    });
+    await service.setClock('2026-01-02T05:00:00.000Z');
+    const registered = await service.registerBatch({ count: 2 });
+    const buyerId = registered.created[0]!.id;
+    await service.purchaseBatch({
+      zone: 'startup',
+      userIds: [buyerId],
+      productId: product.product.id.toString(),
+    });
+    await service.redPacketSignup({ userIds: [buyerId] });
+    await stage.welfareAdmin.setPoolOverride({ bizDate: '2026-01-02', amountFen: '7777' }, 1n);
+
+    const context = await service.redPacketPoolContext();
+    expect(context.adminAmountFen).toBe('7777');
+
+    const advanced = await service.advance({ to: '2026-01-03T05:00:00.000Z' });
+
+    expect(advanced.redPacketPool).toBeNull();
+    const payout = stage.db.redPacketPayout.rows.find((row) => row.bizDate === '2026-01-02')!;
+    expect(payout.amountFen).toBe(7777n);
+  });
+
+  it('reports the typed pool as unused when the advance stops before the settle time', async () => {
+    const locked = {
+      ...stage4Locked(),
+      redPacketRoundPayThresholdFen: 100_000,
+      redPacketRoundClaimCapFen: 5_000,
+    };
+    const { stage, service } = buildSimulationWithJobs(locked);
+    await stage.users.onModuleInit();
+    await service.setClock('2026-01-02T05:00:00.000Z');
+
+    const advanced = await service.advance({
+      to: '2026-01-02T06:00:00.000Z',
+      redPacketPoolFen: '12345',
+    });
+
+    expect(advanced.redPacketPool).toEqual({
+      bizDate: '2026-01-02',
+      amountFen: '12345',
+      applied: false,
+    });
+    expect(stage.db.redPacketDailyAccrual.rows.find((row) => row.bizDate === '2026-01-02')).toBe(
+      undefined,
+    );
   });
 
   it('builds both trees with identities, wallets, filings and unfiled orders', async () => {

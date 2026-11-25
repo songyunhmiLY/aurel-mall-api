@@ -82,4 +82,12 @@ export class SimulateRoleDto {
 export class AdvanceSimulationDto {
   @IsISO8601()
   to!: string;
+
+  /**
+   * 演练红包池金额（十进制分字符串）。只对「本次推进结算的业务日」生效，
+   * 优先级高于管理后台的指定日期金额池与默认计提；不传则按后台设置或默认规则。
+   */
+  @IsOptional()
+  @Matches(/^\d{1,12}$/, { message: '红包池金额不正确' })
+  redPacketPoolFen?: string;
 }

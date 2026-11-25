@@ -9,6 +9,7 @@ import {
 import { ClockService } from '../../common/clock/clock.service';
 import {
   addShanghaiDays,
+  nextShanghaiDate,
   shanghaiAt,
   shanghaiBizDate,
   startOfShanghaiDay,
@@ -39,7 +40,10 @@ import {
 import { OrdersService } from '../orders/orders.service';
 import { WITHDRAWAL_PENDING } from '../wallet/wallet.constants';
 import { WechatPayService } from '../payments/wechat-pay.service';
+import { applyBps } from '../rewards/award-split';
 import { RedPacketService } from '../rewards/red-packet/red-packet.service';
+import { WELFARE_POOL_OVERRIDE_MAX_FEN } from '../rewards/red-packet/red-packet.constants';
+import { PRODUCT_ZONE_STARTUP } from '../catalog/catalog.constants';
 import {
   SIMULATION_STORE,
   type SimulationDiff,
@@ -47,6 +51,8 @@ import {
   type SimulationFilingInfo,
   type SimulationLedgerEntry,
   type SimulationOverview,
+  type SimulationRedPacketPool,
+  type SimulationRedPacketPoolContext,
   type SimulationSnapshot,
   type SimulationStatus,
   type SimulationStore,
@@ -282,10 +288,12 @@ export class SimulationService {
    * 加到仿真时钟上，模拟真实环境里任务占用的时间；若耗时压到了下一档位，下一档
    * 顺延执行。目标时刻本身再兜底跑一次，覆盖落在非整点的定时策略。只能往后推进。
    */
-  async advance(input: { to: string }): Promise<{
+  async advance(input: { to: string; redPacketPoolFen?: string }): Promise<{
     status: SimulationStatus;
     event: SimulationEvent;
     steps: number;
+    /** 本次推进填写的红包池，以及它是否真的被结算用上。 */
+    redPacketPool: SimulationRedPacketPool | null;
   }> {
     this.assertEnabled();
     const view = await this.clock.readOverride();
@@ -306,6 +314,14 @@ export class SimulationService {
       throw new BadRequestException(`单次最多推进 ${MAX_ADVANCE_DAYS} 天`);
     }
 
+    // 演练填写的红包池只给「当前仿真日」用：这一天会在本次推进跨过次日结算钟点时结算。
+    const poolFen = this.parseRedPacketPoolFen(input.redPacketPoolFen);
+    const poolBizDate = poolFen === null ? null : shanghaiBizDate(from);
+    const jobOptions =
+      poolFen === null || poolBizDate === null
+        ? undefined
+        : { redPacketPool: { bizDate: poolBizDate, amountFen: poolFen } };
+
     const slots = await this.collectDailySlotTimes();
     const before = await this.snapshot();
     let steps = 0;
@@ -323,7 +339,7 @@ export class SimulationService {
         const startAt = Math.max(instant.getTime(), lastEnd);
         await this.clock.setOverride(this.clock.instant(startAt).toISOString());
         const wallStart = performance.now();
-        await this.runner.runDue();
+        await this.runner.runDue(jobOptions);
         // 任务的真实执行耗时（哪怕只有几毫秒）体现到仿真时钟上。
         const elapsedMs = Math.round(performance.now() - wallStart);
         lastEnd = Math.max(lastEnd, startAt + elapsedMs);
@@ -335,19 +351,106 @@ export class SimulationService {
     // 全部档位完成后，把仿真起点停在目标时刻；仅当任务耗时意外越过了目标时停在任务结束后。
     const finalAt = Math.max(target.getTime(), lastEnd);
     await this.clock.setOverride(this.clock.instant(finalAt).toISOString());
-    await this.runner.runDue();
+    await this.runner.runDue(jobOptions);
     steps += 1;
 
+    const redPacketPool = await this.describeAdvancePool(poolBizDate, poolFen);
     const diff = diffOf(before, await this.snapshot());
     const event = await this.append(
       'advance',
-      { from: view.override, to: this.clock.instant(finalAt).toISOString(), steps },
+      {
+        from: view.override,
+        to: this.clock.instant(finalAt).toISOString(),
+        steps,
+        ...(redPacketPool
+          ? {
+              redPacketBizDate: redPacketPool.bizDate,
+              redPacketPoolFen: redPacketPool.amountFen,
+              redPacketApplied: redPacketPool.applied,
+            }
+          : {}),
+      },
       diff,
     );
     this.logger.log(
       `simulation advanced ${view.override} -> ${this.clock.instant(finalAt).toISOString()} (${steps} steps)`,
     );
-    return { status: await this.status(), event, steps };
+    return { status: await this.status(), event, steps, redPacketPool };
+  }
+
+  /**
+   * 演练页「红包池」上下文：显示当前仿真日会按什么规则结算，以及后台有没有
+   * 为这一天设置金额。settleAt 是这一天真正结算的时刻（次日检查钟点）。
+   */
+  async redPacketPoolContext(): Promise<SimulationRedPacketPoolContext> {
+    this.assertEnabled();
+    const now = await this.clock.now();
+    const bizDate = shanghaiBizDate(now);
+    const nextDate = nextShanghaiDate(bizDate);
+    const { hour, minute } = this.dailyCheckTime();
+    const from = shanghaiAt(bizDate, 0, 0);
+    const until = shanghaiAt(nextDate, 0, 0);
+    const [accrual, override, signupCount, paidOrders] = await Promise.all([
+      this.prisma.redPacketDailyAccrual.findUnique({ where: { bizDate } }),
+      this.prisma.redPacketPoolOverride.findUnique({ where: { bizDate } }),
+      this.prisma.redPacketSignup.count({ where: { bizDate } }),
+      this.prisma.order.findMany({
+        where: {
+          zone: PRODUCT_ZONE_STARTUP,
+          status: { in: ['paid', 'shipped'] },
+          paidAt: { gte: from, lt: until },
+        },
+      }),
+    ]);
+    let salesFen = 0n;
+    for (const order of paidOrders) {
+      salesFen += BigInt(order.goodsTotalFen);
+    }
+    return {
+      bizDate,
+      settleAt: shanghaiAt(nextDate, hour, minute).toISOString(),
+      settled: accrual?.settledAt != null,
+      adminAmountFen: override ? override.amountFen.toString() : null,
+      signupCount,
+      accrualBps: this.env.locked.redPacketDailyAccrualBps,
+      salesFen: salesFen.toString(),
+      defaultPoolFen: applyBps(salesFen, this.env.locked.redPacketDailyAccrualBps).toString(),
+    };
+  }
+
+  private parseRedPacketPoolFen(value: string | undefined): bigint | null {
+    if (value === undefined || value === '') {
+      return null;
+    }
+    if (!/^\d+$/.test(value)) {
+      throw new BadRequestException('红包池金额不正确');
+    }
+    const fen = BigInt(value);
+    if (fen > BigInt(WELFARE_POOL_OVERRIDE_MAX_FEN)) {
+      throw new BadRequestException('红包池金额超出上限');
+    }
+    return fen;
+  }
+
+  /** 只有本次推进真的结算了该业务日，填写的金额才算用上。 */
+  private async describeAdvancePool(
+    bizDate: string | null,
+    poolFen: bigint | null,
+  ): Promise<SimulationRedPacketPool | null> {
+    if (bizDate === null || poolFen === null) {
+      return null;
+    }
+    const accrual = await this.prisma.redPacketDailyAccrual.findUnique({ where: { bizDate } });
+    return {
+      bizDate,
+      amountFen: poolFen.toString(),
+      applied: accrual?.settledAt != null,
+    };
+  }
+
+  private dailyCheckTime(): { hour: number; minute: number } {
+    const [hourRaw, minuteRaw] = this.env.locked.filingDailyCheckTime.split(':');
+    return { hour: Number(hourRaw), minute: Number(minuteRaw) };
   }
 
   /**

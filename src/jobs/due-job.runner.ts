@@ -4,7 +4,16 @@ import { OrderTimeoutService } from '../modules/orders/order-timeout.service';
 import { SettlementCompensationService } from '../modules/orders/settlement-compensation.service';
 import { FilingService } from '../modules/rewards/filing/filing.service';
 import { PositionsService } from '../modules/rewards/positions/positions.service';
-import { RedPacketService } from '../modules/rewards/red-packet/red-packet.service';
+import {
+  RedPacketService,
+  type RedPacketPoolHint,
+} from '../modules/rewards/red-packet/red-packet.service';
+
+/** 仿真推进时透传给到期任务的临时参数。正式环境的调度不传。 */
+export interface DueJobOptions {
+  /** 只影响命中的那个业务日，不写入管理端设置。 */
+  redPacketPool?: RedPacketPoolHint;
+}
 
 /**
  * 到点要做的事。是否到点由各自服务读取 ClockService，不看机器本地钟。
@@ -23,10 +32,10 @@ export class DueJobRunner {
     private readonly orderTimeouts: OrderTimeoutService,
   ) {}
 
-  async runDue(): Promise<void> {
+  async runDue(options?: DueJobOptions): Promise<void> {
     await this.filing.runDue();
     await this.positions.runDue();
-    await this.redPackets.runDue();
+    await this.redPackets.runDue(options?.redPacketPool);
     await this.cofounders.runDue();
     await this.compensations.runDue();
     // 超时关单放最后：先让补偿有机会结算，结算成功的订单就不再是待支付了。

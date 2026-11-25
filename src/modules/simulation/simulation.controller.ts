@@ -48,6 +48,12 @@ export class SimulationController {
     return this.simulation.usersTree();
   }
 
+  /** 当前仿真日的红包结算上下文：默认计提、后台是否设置、结算时刻。 */
+  @Get('red-packet-pool')
+  redPacketPool() {
+    return this.simulation.redPacketPoolContext();
+  }
+
   /** 节点点击后的账务变动明细（三钱包流水按发生时间倒序，默认最近 100 条）。 */
   @Get('users/:id/ledger')
   userLedger(@Param('id') id: string, @Query('limit') limit?: string) {
@@ -76,7 +82,10 @@ export class SimulationController {
   @Post('advance')
   @HttpCode(200)
   advance(@Body() body: AdvanceSimulationDto) {
-    return this.simulation.advance({ to: body.to });
+    return this.simulation.advance({
+      to: body.to,
+      redPacketPoolFen: body.redPacketPoolFen,
+    });
   }
 
   @Post('register')
