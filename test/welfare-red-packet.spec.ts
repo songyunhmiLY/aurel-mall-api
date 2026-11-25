@@ -677,6 +677,20 @@ describe('welfare red packet', () => {
       copy: '抢红包',
       imageUrl: null,
     });
+    // 入口文案按富文本处理：脚本剔除、插图保留。
+    const rich = await stage.welfareAdmin.setEntry(
+      {
+        copy:
+          '<p style="text-align:center">福利说明</p><script>alert(1)</script>' +
+          '<img src="https://cdn.example.com/b.png" onerror="alert(2)">',
+        imageUrl: '',
+      },
+      1n,
+    );
+    expect(rich.copy).toContain('福利说明');
+    expect(rich.copy).toContain('<img src="https://cdn.example.com/b.png" />');
+    expect(rich.copy).not.toContain('<script');
+    expect(rich.copy).not.toContain('onerror');
     const keys = stage.db.adminSetting.rows.map((row) => row.settingKey);
     expect(keys).toEqual(expect.arrayContaining(['welfare_entry_copy', 'welfare_entry_image_url']));
     expect(keys).not.toEqual(

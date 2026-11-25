@@ -501,7 +501,7 @@ T **不是**锁定项。单位是分，比较的是市场里创业专区已支�
 需要管理员令牌：
 
 - `GET /api/v1/admin/welfare/entry`
-- `PUT /api/v1/admin/welfare/entry`，body：`{ "copy": "抢红包", "imageUrl": "https://cdn.example.com/welfare.png" }`。`imageUrl` 可省略或传空字符串，表示没有图片。文案最长 200，图片地址最长 512。多出来的字段会被拒绝，因此不能从这里改 K、C 或比例。
+- `PUT /api/v1/admin/welfare/entry`，body：`{ "copy": "抢红包", "imageUrl": "https://cdn.example.com/welfare.png" }`。`imageUrl` 可省略或传空字符串，表示没有图片。文案支持富文本 HTML（写入时按白名单净化），最长 20000；图片地址最长 512。多出来的字段会被拒绝，因此不能从这里改 K、C 或比例。
 - `GET /api/v1/admin/welfare/pool-overrides`，`data` 为数组，每项 `{ "bizDate", "amountFen", "settled", "updatedAt" }`，按日期倒序。`settled` 表示该日红包已结算，设置不会再生效。
 - `PUT /api/v1/admin/welfare/pool-overrides`，body：`{ "bizDate": "2026-04-01", "amountFen": "100000" }`。`amountFen` 是十进制分字符串，非负整数，单日上限 2147483647 分。同一天重复设置会覆盖旧值。
 - `DELETE /api/v1/admin/welfare/pool-overrides/:bizDate`。没有设置过返回 404。
@@ -530,12 +530,13 @@ T **不是**锁定项。单位是分，比较的是市场里创业专区已支�
 - 轮播图：`GET|POST /api/v1/admin/home/banners`，`GET|PUT /api/v1/admin/home/banners/:id`，`POST /api/v1/admin/home/banners/:id/status`
 - 滚动字幕：把上面路径里的 `banners` 换成 `tickers`
 - 资讯：换成 `articles`。列表还可按 `kind` 筛选
+- 富文本插图上传：`POST /api/v1/admin/home/images`，multipart 字段名 `file`，支持 png/jpg/gif/webp，单张 5MB 内，返回 `{ "url": "/api/v1/uploads/{id}" }`。公开只读供图走 `GET /api/v1/uploads/:id`（不走登录，带一年缓存）。
 
 创建轮播图的 body：`{ "title", "imageUrl", "pagePath", "sortOrder", "status" }`。`sortOrder` 省略时为 0。`status` 省略时为 `draft`，也可传 `draft`、`on`、`off`。`imageUrl` 必须是 http 或 https，最长 512。`pagePath` 是小程序页面路径，最长 512，不能是 `http://` 或 `https://`。标题最长 128。更新 body 只带要改的字段，不改状态。状态下架传 `{ "status": "off" }`，也可以改回 `draft` 或 `on`。
 
 创建滚动字幕的 body：`{ "content", "sortOrder", "status" }`。文案最长 255。状态与轮播图相同。
 
-创建资讯的 body：`{ "kind", "title", "summary", "body", "coverUrl", "status" }`。`kind` 必填，取值同上。标题最长 200，摘要最长 500，正文最长 20000。`coverUrl` 可省略、传空或 `null`。`status` 省略时为 `draft`；传 `published` 时用业务时钟写入 `publishedAt`。更新不改状态，也不改 `publishedAt`。`POST .../status` 的 `status` 为 `draft`、`published` 或 `off`。从非发布改成 `published` 时，用当时的业务时钟重写 `publishedAt`。下架保留原来的 `publishedAt`。没有定时发布。
+创建资讯的 body：`{ "kind", "title", "summary", "body", "coverUrl", "status" }`。`kind` 必填，取值同上。标题最长 200，摘要最长 500，正文是富文本 HTML（管理端用富文本编辑器产出），最长 60000，写入时后端按白名单净化（剔除脚本、事件属性和 `javascript:` 等协议），H5/小程序用 `rich-text` 渲染。`coverUrl` 可省略、传空或 `null`。`status` 省略时为 `draft`；传 `published` 时用业务时钟写入 `publishedAt`。更新不改状态，也不改 `publishedAt`。`POST .../status` 的 `status` 为 `draft`、`published` 或 `off`。从非发布改成 `published` 时，用当时的业务时钟重写 `publishedAt`。下架保留原来的 `publishedAt`。没有定时发布。
 
 管理端列表带 `page`、`pageSize`，默认第 1 页、每页 20，最大 100。轮播图和字幕还可按 `status` 筛选。返回 `items`、`total`、`page`、`pageSize`。管理端详情比会员端多 `status`、`createdAt`、`updatedAt`；资讯详情始终含 `body`，未发布时 `publishedAt` 为 `null`。编号是十进制字符串。不存在时：轮播图 404「轮播图不存在」，字幕 404「滚动字幕不存在」，资讯 404「资讯不存在」。
 
@@ -860,7 +861,7 @@ T **不是**锁定项。单位是分，比较的是市场里创业专区已支�
 需要管理员令牌：
 
 - `GET /api/v1/admin/cofounder/settings`、`PUT /api/v1/admin/cofounder/settings`
-- `GET /api/v1/admin/cofounder/content`、`PUT /api/v1/admin/cofounder/content`
+- `GET /api/v1/admin/cofounder/content`、`PUT /api/v1/admin/cofounder/content`。介绍正文支持富文本 HTML（写入时按白名单净化），最长 60000。
 - `GET /api/v1/admin/cofounders?status=&page=&pageSize=`
 - `POST /api/v1/admin/cofounders`，body：`{ "userId": "1" }`，指定在籍，可以超过名额
 - `GET /api/v1/admin/cofounders/:userId/cancellation`：按奖励类型的累计入账、联合创始人分红、当前可提现余额、已提现笔数和明细。不执行退款

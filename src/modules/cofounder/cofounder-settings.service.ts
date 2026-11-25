@@ -2,6 +2,7 @@ import { BadRequestException, Injectable } from '@nestjs/common';
 import { ClockService } from '../../common/clock/clock.service';
 import { isShanghaiBizDate } from '../../common/clock/shanghai-calendar';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { sanitizeRichText } from '../../common/text/rich-text';
 import { isScheduleCycle } from './cofounder-schedule';
 import {
   COFOUNDER_ENTRY_COPY_KEY,
@@ -287,13 +288,22 @@ function normalizeContent(input: CofounderContent): CofounderContent {
     entryCopy: boundedText(input.entryCopy, COFOUNDER_ENTRY_COPY_MAX, '入口文案过长'),
     entryImageUrls: normalizeImages(input.entryImageUrls),
     introTitle: boundedText(input.introTitle, COFOUNDER_INTRO_TITLE_MAX, '介绍标题过长'),
-    introBody: boundedText(input.introBody, COFOUNDER_INTRO_BODY_MAX, '介绍正文过长'),
+    introBody: richBoundedText(input.introBody, COFOUNDER_INTRO_BODY_MAX, '介绍正文过长'),
     introImageUrls: normalizeImages(input.introImageUrls),
   };
 }
 
 function boundedText(value: string, max: number, message: string): string {
   const text = value.trim();
+  if (text.length > max) {
+    throw new BadRequestException(message);
+  }
+  return text;
+}
+
+/** 介绍正文按富文本处理：先净化再校验长度，纯文本旧内容不受影响。 */
+function richBoundedText(value: string, max: number, message: string): string {
+  const text = sanitizeRichText(value.trim()).trim();
   if (text.length > max) {
     throw new BadRequestException(message);
   }

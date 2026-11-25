@@ -747,4 +747,32 @@ describe('cofounder identity and dividends', () => {
       ),
     ).rejects.toBeInstanceOf(BadRequestException);
   });
+
+  it('sanitizes the rich-text intro body but keeps images', async () => {
+    const stage = buildStage4(ratios(200, 200));
+    await boot(stage);
+    const saved = await stage.cofounderSettings.setContent(
+      {
+        entryCopy: '',
+        entryImageUrls: [],
+        introTitle: '联创介绍',
+        introBody:
+          '<p style="text-align:center">权益说明</p><script>alert(1)</script>' +
+          '<img src="https://cdn.example.com/c.png" onerror="alert(2)"><iframe></iframe>',
+        introImageUrls: [],
+      },
+      1n,
+    );
+    expect(saved.introBody).toContain('权益说明');
+    expect(saved.introBody).toContain('<img src="https://cdn.example.com/c.png" />');
+    expect(saved.introBody).not.toContain('<script');
+    expect(saved.introBody).not.toContain('onerror');
+    expect(saved.introBody).not.toContain('<iframe');
+    // 纯文本旧内容原样保留。
+    const plain = await stage.cofounderSettings.setContent(
+      { entryCopy: '', entryImageUrls: [], introTitle: '', introBody: '旧版纯文本介绍', introImageUrls: [] },
+      1n,
+    );
+    expect(plain.introBody).toBe('旧版纯文本介绍');
+  });
 });

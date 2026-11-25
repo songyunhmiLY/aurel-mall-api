@@ -21,7 +21,7 @@ model Article {
   kind        String    @db.VarChar(32)
   title       String    @db.VarChar(200)
   summary     String    @db.VarChar(500)
-  body        String    @db.Text
+  body        String    @db.MediumText
   coverUrl    String?   @map("cover_url") @db.VarChar(512)
   status      String    @db.VarChar(32)
   publishedAt DateTime? @map("published_at") @db.DateTime(3)
@@ -44,4 +44,15 @@ model Ticker {
 
   @@index([status, sortOrder], map: "tickers_status_sort_idx")
   @@map("tickers")
+}
+
+/// 资讯和知识富文本里的插图。原图字节存 data，公开只读接口按 id 供图。
+model CmsImage {
+  id        BigInt   @id @default(autoincrement())
+  mime      String   @db.VarChar(64)
+  sizeBytes Int      @map("size_bytes")
+  data      Bytes    @db.LongBlob
+  createdAt DateTime @map("created_at") @db.DateTime(3)
+
+  @@map("cms_images")
 }

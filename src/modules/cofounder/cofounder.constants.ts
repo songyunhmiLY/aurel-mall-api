@@ -9,7 +9,8 @@ export const COFOUNDER_INTRO_IMAGES_KEY = 'cofounder_intro_image_urls';
 
 export const COFOUNDER_ENTRY_COPY_MAX = 500;
 export const COFOUNDER_INTRO_TITLE_MAX = 200;
-export const COFOUNDER_INTRO_BODY_MAX = 20_000;
+/** 介绍正文是富文本 HTML，放宽到 6 万字符。 */
+export const COFOUNDER_INTRO_BODY_MAX = 60_000;
 export const COFOUNDER_IMAGE_MAX = 512;
 export const COFOUNDER_IMAGE_COUNT_MAX = 20;
 

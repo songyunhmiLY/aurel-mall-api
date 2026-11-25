@@ -19,6 +19,12 @@ export const PAGE_PATH_MAX = 512;
 export const TICKER_CONTENT_MAX = 255;
 export const ARTICLE_TITLE_MAX = 200;
 export const ARTICLE_SUMMARY_MAX = 500;
-export const ARTICLE_BODY_MAX = 20_000;
+/** 正文是富文本 HTML，标记本身占字符，放宽到 6 万。 */
+export const ARTICLE_BODY_MAX = 60_000;
+/** 正文里允许出现的图片/链接协议。 */
+export const ARTICLE_ALLOWED_SCHEMES = ['http', 'https'] as const;
+/** 编辑器图片上传单张上限（字节）。 */
+export const CMS_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
+export const CMS_IMAGE_MIMES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'] as const;
 export const SORT_MIN = -1_000_000;
 export const SORT_MAX = 1_000_000;

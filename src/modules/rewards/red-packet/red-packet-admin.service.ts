@@ -9,6 +9,7 @@ import { USER_STATUS_ACTIVE } from '../../../common/auth/user-status';
 import { ClockService } from '../../../common/clock/clock.service';
 import { isShanghaiBizDate, shanghaiBizDate } from '../../../common/clock/shanghai-calendar';
 import { PrismaService } from '../../../common/prisma/prisma.service';
+import { sanitizeRichText } from '../../../common/text/rich-text';
 import {
   WELFARE_ENTRY_COPY_KEY,
   WELFARE_ENTRY_COPY_MAX,
@@ -353,7 +354,8 @@ function assertCopy(copy: string): string {
   if (typeof copy !== 'string') {
     throw new BadRequestException('入口文案不正确');
   }
-  const value = copy.trim();
+  // 入口文案按富文本处理：先净化再校验长度，纯文本旧内容不受影响。
+  const value = sanitizeRichText(copy.trim()).trim();
   if (value.length > WELFARE_ENTRY_COPY_MAX) {
     throw new BadRequestException('入口文案过长');
   }

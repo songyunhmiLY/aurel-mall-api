@@ -262,4 +262,60 @@ describe('homepage banners, tickers, and articles', () => {
     ]);
     expect(Reflect.getMetadata(GUARDS_METADATA, HomeAdminController)).toEqual([AdminJwtGuard]);
   });
+
+  it('sanitizes the rich-text body but keeps images and plain formatting', async () => {
+    const { cms } = buildCms();
+    const raw =
+      '<p style="text-align:center">图文正文</p>' +
+      '<script>alert(1)</script>' +
+      '<img src="https://img.example.com/a.png" alt="插图" onerror="alert(2)">' +
+      '<a href="javascript:alert(3)" target="_blank">坏链接</a>' +
+      '<a href="https://www.example.com">好链接</a>' +
+      '<iframe src="https://evil.example.com"></iframe>';
+    const saved = await cms.createArticle({
+      kind: CMS_KIND_ARTICLE,
+      title: '富文本',
+      summary: '摘要',
+      body: raw,
+    });
+    expect(saved.body).not.toContain('<script');
+    expect(saved.body).not.toContain('onerror');
+    expect(saved.body).not.toContain('javascript:');
+    expect(saved.body).not.toContain('<iframe');
+    expect(saved.body).toContain('<img src="https://img.example.com/a.png"');
+    expect(saved.body).toContain('好链接');
+    expect(saved.body).toContain('style="text-align:center"');
+
+    // 更新同样净化，净化后为空会被拒绝。
+    const edited = await cms.updateArticle(saved.id, {
+      body: '<h2>新标题</h2><b>加粗</b>',
+    });
+    expect(edited.body).toBe('<h2>新标题</h2><b>加粗</b>');
+    await expect(
+      cms.updateArticle(saved.id, { body: '<script>alert(4)</script>' }),
+    ).rejects.toThrow('正文不正确');
+  });
+
+  it('uploads rich-text images and stores raw bytes for the public reader', async () => {
+    const { cms } = buildCms();
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x01]);
+    await expect(cms.uploadImage({ mimetype: 'application/zip', size: 10, buffer: png })).rejects.toThrow(
+      '只支持 png、jpg、gif、webp',
+    );
+    await expect(
+      cms.uploadImage({ mimetype: 'image/png', size: 6 * 1024 * 1024, buffer: png }),
+    ).rejects.toThrow('图片大小要在 5MB 以内');
+    await expect(cms.uploadImage({ mimetype: 'image/png', size: 0, buffer: Buffer.alloc(0) })).rejects.toThrow(
+      '图片大小要在 5MB 以内',
+    );
+
+    const saved = await cms.uploadImage({ mimetype: 'image/png', size: png.length, buffer: png });
+    expect(saved.url).toMatch(/^\/api\/v1\/uploads\/\d+$/);
+    const id = BigInt(saved.url.split('/').pop()!);
+    const row = await cms.getImage(id);
+    expect(row.mime).toBe('image/png');
+    expect(row.sizeBytes).toBe(png.length);
+    expect(Buffer.from(row.data).equals(png)).toBe(true);
+    await expect(cms.getImage(999n)).rejects.toThrow('图片不存在');
+  });
 });

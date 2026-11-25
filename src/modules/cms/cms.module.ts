@@ -4,10 +4,11 @@ import { ClockModule } from '../../common/clock/clock.module';
 import { CmsService } from './cms.service';
 import { HomeAdminController } from './home-admin.controller';
 import { HomePublicController } from './home-public.controller';
+import { UploadsController } from './uploads.controller';
 
 @Module({
   imports: [AuthModule, ClockModule],
-  controllers: [HomePublicController, HomeAdminController],
+  controllers: [UploadsController, HomePublicController, HomeAdminController],
   providers: [CmsService],
   exports: [CmsService],
 })

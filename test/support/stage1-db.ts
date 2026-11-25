@@ -420,6 +420,7 @@ export class Stage1Db {
   readonly banner = new MemoryTable([]);
   readonly article = new MemoryTable([]);
   readonly ticker = new MemoryTable([]);
+  readonly cmsImage = new MemoryTable([]);
 
   async $queryRaw(
     strings: TemplateStringsArray,
@@ -588,6 +589,7 @@ export class Stage1Db {
       this.banner,
       this.article,
       this.ticker,
+      this.cmsImage,
     ];
   }
 }

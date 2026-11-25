@@ -7,10 +7,14 @@ import {
   Post,
   Put,
   Query,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { AdminJwtGuard } from '../../common/auth/admin-jwt.guard';
 import { parsePage, parsePageSize, parseRouteId } from '../../common/http/parse-id';
+import { CMS_IMAGE_MAX_BYTES } from './cms.constants';
 import { CmsService } from './cms.service';
 import { ArticleStatusDto, CreateArticleDto, UpdateArticleDto } from './dto/article.dto';
 import { BannerStatusDto, CreateBannerDto, UpdateBannerDto } from './dto/banner.dto';
@@ -126,6 +130,17 @@ export class HomeAdminController {
   @HttpCode(200)
   setArticleStatus(@Param('id') id: string, @Body() body: ArticleStatusDto) {
     return this.cms.setArticleStatus(parseRouteId(id), body.status);
+  }
+
+  /** 富文本插图上传，multipart 字段名是 file。 */
+  @Post('images')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      limits: { fileSize: CMS_IMAGE_MAX_BYTES, files: 1 },
+    }),
+  )
+  uploadImage(@UploadedFile() file?: { mimetype: string; size: number; buffer: Buffer }) {
+    return this.cms.uploadImage(file ?? { mimetype: '', size: 0, buffer: Buffer.alloc(0) });
   }
 }
 

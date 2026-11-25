@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import type { Article, Banner, Prisma, Ticker } from '@prisma/client';
+import type { Article, Banner, CmsImage, Prisma, Ticker } from '@prisma/client';
 import { ClockService } from '../../common/clock/clock.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import {
@@ -9,6 +9,8 @@ import {
   ARTICLE_TITLE_MAX,
   BANNER_STATUSES,
   BANNER_TITLE_MAX,
+  CMS_IMAGE_MAX_BYTES,
+  CMS_IMAGE_MIMES,
   CMS_KINDS,
   CMS_STATUS_DRAFT,
   CMS_STATUS_ON,
@@ -20,6 +22,7 @@ import {
   TICKER_CONTENT_MAX,
   TICKER_STATUSES,
 } from './cms.constants';
+import { sanitizeRichText } from '../../common/text/rich-text';
 
 export interface PageResult<T> {
   items: T[];
@@ -78,6 +81,11 @@ export interface AdminArticleView {
   publishedAt: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface AdminImageUploadView {
+  /** 相对路径，前端负责拼成绝对地址后再写进正文。 */
+  url: string;
 }
 
 export interface BannerWriteInput {
@@ -355,7 +363,7 @@ export class CmsService {
         kind: parseKind(input.kind),
         title: requiredText(input.title, '标题', ARTICLE_TITLE_MAX),
         summary: requiredText(input.summary, '摘要', ARTICLE_SUMMARY_MAX),
-        body: requiredText(input.body, '正文', ARTICLE_BODY_MAX),
+        body: requiredBody(input.body),
         coverUrl: optionalImageUrl(input.coverUrl, '封面'),
         status,
         publishedAt: status === CMS_STATUS_PUBLISHED ? now : null,
@@ -382,9 +390,7 @@ export class CmsService {
             ? current.summary
             : requiredText(input.summary, '摘要', ARTICLE_SUMMARY_MAX),
         body:
-          input.body === undefined
-            ? current.body
-            : requiredText(input.body, '正文', ARTICLE_BODY_MAX),
+          input.body === undefined ? current.body : requiredBody(input.body),
         coverUrl:
           input.coverUrl === undefined
             ? current.coverUrl
@@ -409,6 +415,42 @@ export class CmsService {
       },
     });
     return toAdminArticle(row);
+  }
+
+  /** 富文本插图上传：原图字节直接入库，返回相对地址由前端拼绝对 URL。 */
+  async uploadImage(file: {
+    mimetype: string;
+    size: number;
+    buffer: Buffer;
+  }): Promise<AdminImageUploadView> {
+    if (!file || !Buffer.isBuffer(file.buffer)) {
+      throw new BadRequestException('请选择图片文件');
+    }
+    if (!(CMS_IMAGE_MIMES as readonly string[]).includes(file.mimetype)) {
+      throw new BadRequestException('只支持 png、jpg、gif、webp 图片');
+    }
+    if (file.size < 1 || file.size > CMS_IMAGE_MAX_BYTES) {
+      throw new BadRequestException('图片大小要在 5MB 以内');
+    }
+    const now = await this.clock.now();
+    const row = await this.prisma.cmsImage.create({
+      data: {
+        mime: file.mimetype,
+        sizeBytes: file.size,
+        data: new Uint8Array(file.buffer),
+        createdAt: now,
+      },
+    });
+    return { url: `/api/v1/uploads/${row.id}` };
+  }
+
+  /** 公开只读供图：富文本和封面里的图片不走登录。 */
+  async getImage(id: bigint): Promise<CmsImage> {
+    const row = await this.prisma.cmsImage.findUnique({ where: { id } });
+    if (!row) {
+      throw new NotFoundException('图片不存在');
+    }
+    return row;
   }
 
   private async pageBanners(
@@ -563,6 +605,22 @@ function requiredText(value: string, label: string, max: number): string {
     throw new BadRequestException(`${label}不正确`);
   }
   return trimmed;
+}
+
+/** 正文按富文本处理：先净化再校验长度，纯文本旧内容不受影响。 */
+function requiredBody(value: string): string {
+  if (typeof value !== 'string') {
+    throw new BadRequestException('正文不正确');
+  }
+  const trimmed = value.trim();
+  if (trimmed.length < 1) {
+    throw new BadRequestException('正文不正确');
+  }
+  const safe = sanitizeRichText(trimmed).trim();
+  if (safe.length < 1 || safe.length > ARTICLE_BODY_MAX) {
+    throw new BadRequestException('正文不正确');
+  }
+  return safe;
 }
 
 function assertSort(value: number): number {
